@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import os
+import sys
+
+import streamlit as st
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from frontend.components.sidebar import render_sidebar
+from frontend.pages import admin_dashboard, analytics_page, login_page, principal_dashboard
+
+
+def _init_session_state() -> None:
+    defaults = {
+        "is_logged_in": False,
+        "user_id": "",
+        "role": "",
+        "username": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _route_authenticated_user() -> None:
+    role = str(st.session_state.get("role", "")).strip().lower()
+    user_id = str(st.session_state.get("user_id", "")).strip()
+    username = str(st.session_state.get("username", "")).strip()
+
+    selected_page = render_sidebar(role, username)
+    if selected_page is None:
+        st.error("Access denied")
+        return
+
+    if role in {"admin", "super_user", "superuser"}:
+        if selected_page in {"School Management", "Session Management", "Principal Management"}:
+            admin_dashboard.render_admin_page(selected_page, user_id)
+            return
+        if selected_page == "Global Analytics":
+            analytics_page.render_admin_analytics(user_id)
+            return
+        st.error("Access denied")
+        return
+
+    if role == "principal":
+        if selected_page in {"Class Management", "Subject Management", "Teacher Management", "Assignments"}:
+            principal_dashboard.render_principal_page(selected_page, user_id)
+            return
+        if selected_page == "School Analytics":
+            analytics_page.render_principal_analytics(user_id)
+            return
+        st.error("Access denied")
+        return
+
+    if role == "teacher":
+        if selected_page == "School Analytics":
+            analytics_page.render_teacher_analytics(user_id)
+            return
+        st.error("Access denied")
+        return
+
+    st.error("Access denied")
+
+
+def main() -> None:
+    st.set_page_config(page_title="School Management", layout="wide")
+    _init_session_state()
+
+    if not st.session_state.get("is_logged_in", False):
+        login_page.render_login_page()
+        return
+
+    _route_authenticated_user()
+
+
+if __name__ == "__main__":
+    main()
