@@ -10,24 +10,24 @@ import streamlit as st
 _PLOTLY_IO: Any = None
 
 LIGHT_THEME: Dict[str, str] = {
-    "primaryColor": "#4F46E5",
-    "backgroundColor": "#F5F7FA",
-    "secondaryBackgroundColor": "#EDEFF5",
-    "cardColor": "#FFFFFF",
-    "textColor": "#111827",
-    "mutedText": "#6B7280",
-    "cardBorder": "#E5E7EB",
-    "sidebarBg": "#EDEFF5",
-    "sidebarText": "#111827",
-    "buttonBg": "#4F46E5",
+    "primaryColor": "#B77942",
+    "backgroundColor": "#F6EFE3",
+    "secondaryBackgroundColor": "#EADBC4",
+    "cardColor": "#FFF9EF",
+    "textColor": "#3E2F22",
+    "mutedText": "#7F6A54",
+    "cardBorder": "#D8C3A8",
+    "sidebarBg": "#E7D5BC",
+    "sidebarText": "#3E2F22",
+    "buttonBg": "#B77942",
     "buttonText": "#FFFFFF",
-    "buttonDisabledBg": "#C7D2FE",
-    "buttonDisabledText": "#4B5563",
-    "sidebarActiveBg": "#E0E7FF",
-    "sidebarActiveText": "#1E3A8A",
+    "buttonDisabledBg": "#D9C0A6",
+    "buttonDisabledText": "#6C5A47",
+    "sidebarActiveBg": "#D4BA98",
+    "sidebarActiveText": "#3A2511",
     "sidebarInactiveBg": "transparent",
-    "chartGrid": "#D1D5DB",
-    "chartPrimary": "#4F46E5",
+    "chartGrid": "#CEB899",
+    "chartPrimary": "#B77942",
 }
 
 DARK_THEME: Dict[str, str] = {
@@ -173,6 +173,10 @@ def apply_theme() -> None:
         fill: var(--sms-text) !important;
     }}
 
+    [data-testid="stToolbar"] {{
+        background: transparent !important;
+    }}
+
     [data-testid="stAppViewContainer"] > .main {{
         background: var(--sms-bg) !important;
     }}
@@ -197,9 +201,27 @@ def apply_theme() -> None:
         overflow: hidden !important;
     }}
 
+    div[data-testid="stDataFrame"] {{
+        --gdg-bg-cell: var(--sms-card) !important;
+        --gdg-bg-header: var(--sms-surface) !important;
+        --gdg-bg-header-has-focus: var(--sms-surface) !important;
+        --gdg-bg-cell-medium: var(--sms-card) !important;
+        --gdg-bg-cell-even: var(--sms-card) !important;
+        --gdg-text-dark: var(--sms-text) !important;
+        --gdg-text-medium: var(--sms-text) !important;
+        --gdg-text-header: var(--sms-text) !important;
+        --gdg-border-color: var(--sms-border) !important;
+        --gdg-accent-color: var(--sms-primary) !important;
+    }}
+
     div[data-testid="stDataFrame"] * {{
         color: var(--sms-text) !important;
         border-color: var(--sms-border) !important;
+    }}
+
+    div[data-testid="stDataFrame"] canvas,
+    div[data-testid="stDataFrame"] [role="grid"] {{
+        background: var(--sms-card) !important;
     }}
 
     div[data-testid="stDataFrame"] [role="columnheader"],
@@ -218,6 +240,72 @@ def apply_theme() -> None:
     div[data-testid="stDataFrame"] [class*="row"]:hover [class*="cell"],
     div[data-testid="stDataFrame"] [role="row"]:hover [role="gridcell"] {{
         background: color-mix(in srgb, var(--sms-primary) 12%, var(--sms-card)) !important;
+    }}
+
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stMultiSelect"] label,
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stNumberInput"] label,
+    div[data-testid="stDateInput"] label,
+    div[data-testid="stTextArea"] label,
+    div[data-testid="stFileUploader"] label,
+    div[data-testid="stRadio"] label,
+    div[data-testid="stCheckbox"] label {{
+        color: var(--sms-text) !important;
+    }}
+
+    div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    div[data-testid="stMultiSelect"] [data-baseweb="select"] > div {{
+        background: var(--sms-card) !important;
+        border: 1px solid var(--sms-border) !important;
+        color: var(--sms-text) !important;
+        border-radius: 10px !important;
+    }}
+
+    div[data-testid="stSelectbox"] [data-baseweb="select"] *,
+    div[data-testid="stMultiSelect"] [data-baseweb="select"] * {{
+        color: var(--sms-text) !important;
+        fill: var(--sms-text) !important;
+    }}
+
+    [data-baseweb="popover"],
+    [data-baseweb="menu"],
+    div[role="listbox"] {{
+        background: var(--sms-card) !important;
+        color: var(--sms-text) !important;
+        border: 1px solid var(--sms-border) !important;
+    }}
+
+    div[role="option"] {{
+        color: var(--sms-text) !important;
+        background: var(--sms-card) !important;
+    }}
+
+    div[role="option"]:hover,
+    div[role="option"][aria-selected="true"] {{
+        background: color-mix(in srgb, var(--sms-primary) 14%, var(--sms-card)) !important;
+    }}
+
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stDateInput"] input,
+    div[data-testid="stTextArea"] textarea {{
+        background: var(--sms-card) !important;
+        color: var(--sms-text) !important;
+        border: 1px solid var(--sms-border) !important;
+        border-radius: 10px !important;
+    }}
+
+    div[data-testid="stTextInput"] input::placeholder,
+    div[data-testid="stNumberInput"] input::placeholder,
+    div[data-testid="stDateInput"] input::placeholder,
+    div[data-testid="stTextArea"] textarea::placeholder {{
+        color: var(--sms-muted) !important;
+    }}
+
+    div[data-testid="stRadio"] [role="radiogroup"],
+    div[data-testid="stCheckbox"] [data-testid="stMarkdownContainer"] {{
+        color: var(--sms-text) !important;
     }}
 
     div[data-testid="stTable"] table {{
