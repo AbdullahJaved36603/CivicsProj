@@ -11,7 +11,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from frontend.components.sidebar import render_sidebar
-from frontend.pages import admin_dashboard, analytics_page, login_page, principal_dashboard
+from frontend.pages import admin_dashboard, analytics_page, login_page, principal_dashboard, profile_settings, teacher_dashboard
+from frontend.ui_theme import apply_theme, init_ui_state
 
 
 def _init_session_state() -> None:
@@ -20,10 +21,13 @@ def _init_session_state() -> None:
         "user_id": "",
         "role": "",
         "username": "",
+        "selected_session_id": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+    init_ui_state()
 
 
 def _route_authenticated_user() -> None:
@@ -43,22 +47,31 @@ def _route_authenticated_user() -> None:
         if selected_page == "Global Analytics":
             analytics_page.render_admin_analytics(user_id)
             return
+        if selected_page == "Profile Settings":
+            profile_settings.render_profile_settings(user_id, username)
+            return
         st.error("Access denied")
         return
 
     if role == "principal":
-        if selected_page in {"Class Management", "Subject Management", "Teacher Management", "Assignments"}:
+        if selected_page in {"Class Management", "Subject Management", "Teacher Management", "Assignments", "Class Incharge"}:
             principal_dashboard.render_principal_page(selected_page, user_id)
             return
         if selected_page == "School Analytics":
             analytics_page.render_principal_analytics(user_id)
             return
+        if selected_page == "Profile Settings":
+            profile_settings.render_profile_settings(user_id, username)
+            return
         st.error("Access denied")
         return
 
     if role == "teacher":
-        if selected_page == "School Analytics":
-            analytics_page.render_teacher_analytics(user_id)
+        if selected_page in {"Student Enrollment", "Results Entry", "School Analytics"}:
+            teacher_dashboard.render_teacher_page(selected_page, user_id)
+            return
+        if selected_page == "Profile Settings":
+            profile_settings.render_profile_settings(user_id, username)
             return
         st.error("Access denied")
         return
@@ -69,6 +82,7 @@ def _route_authenticated_user() -> None:
 def main() -> None:
     st.set_page_config(page_title="School Management", layout="wide")
     _init_session_state()
+    apply_theme()
 
     if not st.session_state.get("is_logged_in", False):
         login_page.render_login_page()

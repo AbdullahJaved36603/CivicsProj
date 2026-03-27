@@ -1,190 +1,414 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import streamlit as st
 
-from frontend.components.forms import build_option_map, form_heading, get_select_value, show_form_result
+from frontend.components.forms import build_option_map, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
+from frontend.ui_theme import card, controls_disabled, render_page_header, show_loading
 from system_admin import service_layer
+from system_admin.google_sheets_utils import safe_sheet_read
 
 
-def _schools() -> List[Dict[str, Any]]:
-    response = service_layer.get_all_schools()
-    return response.get("data", {}).get("schools", []) if response.get("success") else []
+def _safe_backend_call(api_func: Callable[[], Dict[str, Any]], spinner_text: str) -> Dict[str, Any]:
+    if controls_disabled():
+        return {"success": False, "message": "Please wait, loading data..."}
+
+    try:
+        with show_loading(spinner_text):
+            response = safe_sheet_read(api_func, retries=3, delay_seconds=1.0)
+        if isinstance(response, dict):
+            return response
+        return {"success": False, "message": "Unexpected server response."}
+    except Exception:
+        return {
+            "success": False,
+            "message": "Network issue while fetching data. Please wait and try again.",
+        }
+
+
+def _cached_read(cache_key: str, fetch_func: Callable[[], Dict[str, Any]], data_key: str, spinner_text: str) -> List[Dict[str, Any]]:
+    if cache_key in st.session_state:
+        return list(st.session_state.get(cache_key, []))
+
+    response = _safe_backend_call(fetch_func, spinner_text)
+    if not response.get("success"):
+        st.session_state[cache_key] = []
+        return []
+
+    rows = response.get("data", {}).get(data_key, [])
+    st.session_state[cache_key] = rows
+    return list(rows)
+
+
+def _invalidate_admin_cache() -> None:
+    keys = [
+        "admin_all_schools",
+        "admin_sessions",
+        "admin_principals",
+        "admin_exam_sessions",
+    ]
+    for key in list(st.session_state.keys()):
+        if key in keys or key.startswith("admin_schools::"):
+            st.session_state.pop(key, None)
+
+
+def _schools(session_id: str = "") -> List[Dict[str, Any]]:
+    cache_key = "admin_all_schools" if not session_id else f"admin_schools::{session_id}"
+    return _cached_read(
+        cache_key=cache_key,
+        fetch_func=lambda: service_layer.get_all_schools(session_id=session_id),
+        data_key="schools",
+        spinner_text="Loading schools...",
+    )
 
 
 def _principals() -> List[Dict[str, Any]]:
-    response = service_layer.get_principals()
-    return response.get("data", {}).get("principals", []) if response.get("success") else []
+    return _cached_read(
+        cache_key="admin_principals",
+        fetch_func=service_layer.get_principals,
+        data_key="principals",
+        spinner_text="Loading principals...",
+    )
 
 
 def _sessions() -> List[Dict[str, Any]]:
-    response = service_layer.get_sessions()
-    return response.get("data", {}).get("sessions", []) if response.get("success") else []
+    return _cached_read(
+        cache_key="admin_sessions",
+        fetch_func=service_layer.get_sessions,
+        data_key="sessions",
+        spinner_text="Loading sessions...",
+    )
 
 
-def _active_session() -> Dict[str, Any]:
-    response = service_layer.get_active_session()
-    if not response.get("success"):
-        return {}
-    return response.get("data", {}).get("session", {})
-
-
-def _render_school_management(admin_id: str) -> None:
-    form_heading("School Management", "Create and remove schools")
-
-    active_session = _active_session()
-    if active_session:
-        session_name = str(active_session.get("session_name", ""))
-        st.info(f"Active session: {session_name}")
-    else:
-        st.warning("No active session found. School creation is disabled.")
-
-    with st.form("create_school_form"):
-        school_name = st.text_input("School name")
-        submitted = st.form_submit_button("Create School", disabled=not bool(active_session))
-    if submitted:
-        response = service_layer.create_school(admin_id, school_name)
-        show_form_result(response)
-        show_response_payload(response)
-
-    schools = _schools()
-    school_map = build_option_map(schools, "school_id", "school_name")
-    if school_map:
-        with st.form("delete_school_form"):
-            selected = st.selectbox("School", list(school_map.keys()))
-            submitted = st.form_submit_button("Delete School")
-        if submitted:
-            school_id = get_select_value(school_map, selected)
-            response = service_layer.delete_school(admin_id, school_id)
-            show_form_result(response)
-            show_response_payload(response)
-    else:
-        st.info("No schools available for deletion.")
-
-    show_records("Schools", schools)
-
-
-def _render_session_management(admin_id: str) -> None:
-    form_heading("Session Management", "Create, activate, or deactivate sessions")
-
-    with st.form("create_session_form"):
-        session_name = st.text_input("Session name")
-        copy_previous = st.checkbox("Copy previous session structure")
-        submitted = st.form_submit_button("Create Session")
-    if submitted:
-        response = service_layer.create_session(admin_id, session_name, copy_previous=copy_previous)
-        show_form_result(response)
-        show_response_payload(response)
-
+def _session_selector() -> Tuple[str, Dict[str, str]]:
     sessions = _sessions()
     session_map = build_option_map(sessions, "session_id", "session_name")
 
-    if session_map:
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.form("activate_session_form"):
-                selected = st.selectbox("Session to activate", list(session_map.keys()), key="activate_session_select")
-                submitted = st.form_submit_button("Activate Session")
-            if submitted:
-                session_id = get_select_value(session_map, selected)
-                response = service_layer.activate_session(admin_id, session_id)
-                show_form_result(response)
-                show_response_payload(response)
+    if not session_map:
+        st.warning("No sessions available.")
+        st.session_state["selected_session_id"] = ""
+        return "", session_map
 
-        with col2:
-            with st.form("deactivate_session_form"):
-                selected = st.selectbox("Session to deactivate", list(session_map.keys()), key="deactivate_session_select")
-                submitted = st.form_submit_button("Deactivate Session")
-            if submitted:
-                session_id = get_select_value(session_map, selected)
-                response = service_layer.deactivate_session(admin_id, session_id)
-                show_form_result(response)
-                show_response_payload(response)
-    else:
-        st.info("No sessions available.")
+    labels = ["Select session context"] + list(session_map.keys())
+    selected_session_id = str(st.session_state.get("selected_session_id", "")).strip()
 
-    show_records("Sessions", sessions)
+    default_index = 0
+    if selected_session_id:
+        for idx, label in enumerate(labels):
+            if label == "Select session context":
+                continue
+            if get_select_value(session_map, label) == selected_session_id:
+                default_index = idx
+                break
+
+    selected_label = st.selectbox(
+        "Session Context",
+        labels,
+        index=default_index,
+        key="admin_selected_session_label",
+        disabled=controls_disabled(),
+    )
+    if selected_label == "Select session context":
+        st.session_state["selected_session_id"] = ""
+        return "", session_map
+
+    selected_session_id = get_select_value(session_map, selected_label)
+    st.session_state["selected_session_id"] = selected_session_id
+    return selected_session_id, session_map
 
 
-def _render_principal_management(admin_id: str) -> None:
-    form_heading("Principal Management", "Create, assign, deassign, and deactivate principals")
+def _render_school_management(admin_id: str, selected_session_id: str) -> None:
+    with card("School Management", "Create, delete, and review schools in the selected session"):
+        if not selected_session_id:
+            st.warning("Select a session to manage schools.")
+            return
 
-    with st.form("create_principal_form"):
-        username = st.text_input("Principal username")
-        submitted = st.form_submit_button("Create Principal")
-    if submitted:
-        if not username.strip():
-            st.error("Username cannot be empty")
-            st.stop()
-        response = service_layer.create_principal(admin_id, username)
-        show_form_result(response)
-        show_response_payload(response)
-
-    principals = _principals()
-    schools = _schools()
-    principal_map = build_option_map(principals, "principal_id", "username")
-    school_map = build_option_map(schools, "school_id", "school_name")
-
-    if principal_map and school_map:
-        with st.form("assign_principal_form"):
-            selected_principal = st.selectbox("Principal", list(principal_map.keys()))
-            selected_school = st.selectbox("School", list(school_map.keys()))
-            submitted = st.form_submit_button("Assign Principal")
+        with st.form("create_school_form"):
+            school_name = st.text_input("School name", disabled=controls_disabled())
+            submitted = st.form_submit_button("Create School", use_container_width=True, disabled=controls_disabled())
         if submitted:
-            principal_id = get_select_value(principal_map, selected_principal)
-            school_id = get_select_value(school_map, selected_school)
-            response = service_layer.assign_principal(admin_id, principal_id, school_id)
+            response = _safe_backend_call(
+                lambda: service_layer.create_school(admin_id, school_name, selected_session_id),
+                "Creating school...",
+            )
             show_form_result(response)
             show_response_payload(response)
-    else:
-        st.info("Principal assignment requires at least one principal and one school.")
+            if response.get("success"):
+                _invalidate_admin_cache()
 
-    if principal_map:
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.form("deassign_principal_form"):
-                selected_principal = st.selectbox(
-                    "Principal to deassign",
-                    list(principal_map.keys()),
-                    key="deassign_principal_select",
-                )
-                submitted = st.form_submit_button("Deassign Principal")
+        schools = _schools(selected_session_id)
+        school_map = build_option_map(schools, "school_id", "school_name")
+        if school_map:
+            with st.form("delete_school_form"):
+                selected = st.selectbox("School", list(school_map.keys()), disabled=controls_disabled())
+                submitted = st.form_submit_button("Delete School", use_container_width=True, disabled=controls_disabled())
             if submitted:
-                principal_id = get_select_value(principal_map, selected_principal)
-                response = service_layer.deassign_principal(admin_id, principal_id)
+                school_id = get_select_value(school_map, selected)
+                response = _safe_backend_call(
+                    lambda: service_layer.delete_school(admin_id, school_id, selected_session_id),
+                    "Deleting school...",
+                )
                 show_form_result(response)
                 show_response_payload(response)
+                if response.get("success"):
+                    _invalidate_admin_cache()
+        else:
+            st.info("No schools available for deletion.")
 
-        with col2:
-            with st.form("deactivate_principal_form"):
-                selected_principal = st.selectbox(
-                    "Principal to deactivate",
-                    list(principal_map.keys()),
-                    key="deactivate_principal_select",
-                )
-                submitted = st.form_submit_button("Deactivate Principal")
+        show_records("Schools", schools)
+
+
+def _render_session_management(admin_id: str, selected_session_id: str) -> None:
+    with card("Session Management", "Create session cycles and exam sessions"):
+        with st.form("create_session_form"):
+            session_name = st.text_input("Session name", disabled=controls_disabled())
+            copy_previous = st.checkbox(
+                "Copy schools and teachers from previous session",
+                disabled=controls_disabled(),
+            )
+            submitted = st.form_submit_button("Create Session", use_container_width=True, disabled=controls_disabled())
+        if submitted:
+            response = _safe_backend_call(
+                lambda: service_layer.create_session(admin_id, session_name, copy_previous=copy_previous),
+                "Creating session...",
+            )
+            show_form_result(response)
+            show_response_payload(response)
+            if response.get("success"):
+                _invalidate_admin_cache()
+
+        sessions = _sessions()
+        session_map = build_option_map(sessions, "session_id", "session_name")
+
+        if session_map:
+            with st.form("create_exam_session_form"):
+                selected_session = st.selectbox("Parent session", list(session_map.keys()), disabled=controls_disabled())
+                month = st.text_input("Exam month", disabled=controls_disabled())
+                submitted = st.form_submit_button("Create Exam Session", use_container_width=True, disabled=controls_disabled())
             if submitted:
-                principal_id = get_select_value(principal_map, selected_principal)
-                response = service_layer.deactivate_principal(admin_id, principal_id)
+                session_id = get_select_value(session_map, selected_session)
+                response = _safe_backend_call(
+                    lambda: service_layer.create_exam_session(admin_id, session_id, month),
+                    "Creating exam session...",
+                )
                 show_form_result(response)
                 show_response_payload(response)
-    else:
-        st.info("No principals available.")
+                if response.get("success"):
+                    _invalidate_admin_cache()
+        else:
+            st.info("Create a session before creating exam sessions.")
 
-    show_records("Principals", principals)
+        exam_sessions_response = _safe_backend_call(
+            lambda: service_layer.get_exam_sessions(selected_session_id),
+            "Loading exam sessions...",
+        )
+        exam_sessions = (
+            exam_sessions_response.get("data", {}).get("exam_sessions", [])
+            if exam_sessions_response.get("success")
+            else []
+        )
+        show_records("Exam Sessions", exam_sessions)
+
+        if session_map:
+            col1, col2 = st.columns(2)
+            with col1:
+                with st.form("activate_session_form"):
+                    selected = st.selectbox(
+                        "Session to activate",
+                        list(session_map.keys()),
+                        key="activate_session_select",
+                        disabled=controls_disabled(),
+                    )
+                    submitted = st.form_submit_button("Activate Session", use_container_width=True, disabled=controls_disabled())
+                if submitted:
+                    session_id = get_select_value(session_map, selected)
+                    response = _safe_backend_call(
+                        lambda: service_layer.activate_session(admin_id, session_id),
+                        "Activating session...",
+                    )
+                    show_form_result(response)
+                    show_response_payload(response)
+                    if response.get("success"):
+                        _invalidate_admin_cache()
+
+            with col2:
+                with st.form("deactivate_session_form"):
+                    selected = st.selectbox(
+                        "Session to deactivate",
+                        list(session_map.keys()),
+                        key="deactivate_session_select",
+                        disabled=controls_disabled(),
+                    )
+                    submitted = st.form_submit_button("Deactivate Session", use_container_width=True, disabled=controls_disabled())
+                if submitted:
+                    session_id = get_select_value(session_map, selected)
+                    response = _safe_backend_call(
+                        lambda: service_layer.deactivate_session(admin_id, session_id),
+                        "Deactivating session...",
+                    )
+                    show_form_result(response)
+                    show_response_payload(response)
+                    if response.get("success"):
+                        _invalidate_admin_cache()
+        else:
+            st.info("No sessions available.")
+
+        show_records("Sessions", sessions)
+
+
+def _render_principal_management(admin_id: str, selected_session_id: str) -> None:
+    with card("Principal Management", "Create, assign, deassign, and deactivate principals"):
+        if not selected_session_id:
+            st.warning("Select a session to manage principal assignments.")
+            return
+
+        with st.form("create_principal_form"):
+            username = st.text_input("Principal username", disabled=controls_disabled())
+            submitted = st.form_submit_button("Create Principal", use_container_width=True, disabled=controls_disabled())
+        if submitted:
+            if not username.strip():
+                st.error("Username cannot be empty")
+                st.stop()
+            response = _safe_backend_call(
+                lambda: service_layer.create_principal(admin_id, username),
+                "Creating principal...",
+            )
+            show_form_result(response)
+            show_response_payload(response)
+            if response.get("success"):
+                _invalidate_admin_cache()
+
+        principals = _principals()
+        schools = _schools(selected_session_id)
+        principal_map = build_option_map(principals, "principal_id", "username")
+        school_map = build_option_map(schools, "school_id", "school_name")
+
+        assignments: List[Dict[str, Any]] = []
+        for principal in principals:
+            principal_id = str(principal.get("principal_id", ""))
+            principal_username = str(principal.get("username", ""))
+            assigned_schools = principal.get("assigned_schools", []) or []
+            for school in assigned_schools:
+                session_id = str(school.get("session_id", ""))
+                if selected_session_id and session_id != selected_session_id:
+                    continue
+                assignments.append(
+                    {
+                        "label": f"{principal_username} -> {school.get('school_name', '')}",
+                        "principal_id": principal_id,
+                        "principal_username": principal_username,
+                        "school_id": school.get("school_id", ""),
+                        "school_name": school.get("school_name", ""),
+                        "session_id": session_id,
+                    }
+                )
+
+        if principal_map and school_map:
+            with st.form("assign_principal_form"):
+                selected_principal = st.selectbox("Principal", list(principal_map.keys()), disabled=controls_disabled())
+                selected_school = st.selectbox("School", list(school_map.keys()), disabled=controls_disabled())
+                replace_existing = st.checkbox(
+                    "Replace existing principal if already assigned",
+                    disabled=controls_disabled(),
+                )
+                submitted = st.form_submit_button("Assign Principal", use_container_width=True, disabled=controls_disabled())
+            if submitted:
+                principal_id = get_select_value(principal_map, selected_principal)
+                school_id = get_select_value(school_map, selected_school)
+                response = _safe_backend_call(
+                    lambda: service_layer.assign_principal(
+                        admin_id,
+                        principal_id,
+                        school_id,
+                        replace_existing=replace_existing,
+                    ),
+                    "Assigning principal...",
+                )
+                show_form_result(response)
+                show_response_payload(response)
+                if response.get("success"):
+                    _invalidate_admin_cache()
+        else:
+            st.info("Principal assignment requires at least one principal and one school.")
+
+        if principal_map:
+            col1, col2 = st.columns(2)
+            with col1:
+                assignment_map = build_option_map(assignments, "label", "label")
+                if assignment_map:
+                    with st.form("deassign_principal_form"):
+                        selected_assignment = st.selectbox(
+                            "Assignment to deassign",
+                            list(assignment_map.keys()),
+                            key="deassign_principal_select",
+                            disabled=controls_disabled(),
+                        )
+                        submitted = st.form_submit_button("Deassign Principal", use_container_width=True, disabled=controls_disabled())
+                    if submitted:
+                        selected_label = get_select_value(assignment_map, selected_assignment)
+                        selected_row = next(
+                            (item for item in assignments if str(item.get("label", "")) == selected_label),
+                            {},
+                        )
+                        principal_id = str(selected_row.get("principal_id", ""))
+                        school_id = str(selected_row.get("school_id", ""))
+                        response = _safe_backend_call(
+                            lambda: service_layer.deassign_principal(admin_id, principal_id, school_id),
+                            "Deassigning principal...",
+                        )
+                        show_form_result(response)
+                        show_response_payload(response)
+                        if response.get("success"):
+                            _invalidate_admin_cache()
+                else:
+                    st.info("No principal assignments found in selected session.")
+
+            with col2:
+                with st.form("deactivate_principal_form"):
+                    selected_principal = st.selectbox(
+                        "Principal to deactivate",
+                        list(principal_map.keys()),
+                        key="deactivate_principal_select",
+                        disabled=controls_disabled(),
+                    )
+                    submitted = st.form_submit_button("Deactivate Principal", use_container_width=True, disabled=controls_disabled())
+                if submitted:
+                    principal_id = get_select_value(principal_map, selected_principal)
+                    response = _safe_backend_call(
+                        lambda: service_layer.deactivate_principal(admin_id, principal_id),
+                        "Deactivating principal...",
+                    )
+                    show_form_result(response)
+                    show_response_payload(response)
+                    if response.get("success"):
+                        _invalidate_admin_cache()
+        else:
+            st.info("No principals available.")
+
+        show_records("Principal Assignments", assignments)
+        show_records("Principals", principals)
 
 
 def render_admin_page(selected_page: str, admin_id: str) -> None:
+    if controls_disabled():
+        st.warning("Please wait, loading data...")
+        st.stop()
+
+    render_page_header("Admin Dashboard", "Manage sessions, schools, principals, and system structure")
+
+    with card("Session Context", "Choose which session your admin actions should target"):
+        selected_session_id, _ = _session_selector()
+
     if selected_page == "School Management":
-        _render_school_management(admin_id)
+        _render_school_management(admin_id, selected_session_id)
         return
     if selected_page == "Session Management":
-        _render_session_management(admin_id)
+        _render_session_management(admin_id, selected_session_id)
         return
     if selected_page == "Principal Management":
-        _render_principal_management(admin_id)
+        _render_principal_management(admin_id, selected_session_id)
         return
 
     st.error("Access denied")

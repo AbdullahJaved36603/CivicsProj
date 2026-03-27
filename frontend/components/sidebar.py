@@ -4,12 +4,15 @@ from typing import List, Optional
 
 import streamlit as st
 
+from frontend.ui_theme import controls_disabled, render_theme_toggle
+
 
 ADMIN_PAGES: List[str] = [
     "School Management",
     "Session Management",
     "Principal Management",
     "Global Analytics",
+    "Profile Settings",
 ]
 
 PRINCIPAL_PAGES: List[str] = [
@@ -17,10 +20,12 @@ PRINCIPAL_PAGES: List[str] = [
     "Subject Management",
     "Teacher Management",
     "Assignments",
+    "Class Incharge",
     "School Analytics",
+    "Profile Settings",
 ]
 
-TEACHER_PAGES: List[str] = ["School Analytics"]
+TEACHER_PAGES: List[str] = ["Student Enrollment", "Results Entry", "School Analytics", "Profile Settings"]
 
 
 def pages_for_role(role: str) -> List[str]:
@@ -41,14 +46,47 @@ def render_sidebar(role: str, username: str) -> Optional[str]:
             st.error("Access denied")
         return None
 
+    if "nav_page" not in st.session_state or st.session_state.get("nav_page") not in available_pages:
+        st.session_state["nav_page"] = available_pages[0]
+
+    is_loading = controls_disabled()
+
     with st.sidebar:
-        st.markdown("### Navigation")
+        st.markdown("### School Management")
         st.caption(f"User: {username}")
         st.caption(f"Role: {role}")
-        selected_page = st.radio("Go to", options=available_pages, key="nav_page")
+        render_theme_toggle()
 
-        if st.button("Logout", use_container_width=True):
-            for key in ["is_logged_in", "user_id", "role", "username", "nav_page"]:
+        st.markdown("<div class='sms-sidebar-section'>Navigation</div>", unsafe_allow_html=True)
+        selected_page = str(st.session_state.get("nav_page", available_pages[0]))
+        for index, page in enumerate(available_pages):
+            is_active = selected_page == page
+            clicked = st.button(
+                page,
+                key=f"sidebar_nav_{role}_{index}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True,
+                disabled=is_loading,
+            )
+            if clicked and not is_loading:
+                st.session_state["nav_page"] = page
+                st.rerun()
+
+        selected_page = str(st.session_state.get("nav_page", available_pages[0]))
+
+        st.markdown("<div class='sms-sidebar-section'>Session</div>", unsafe_allow_html=True)
+        if st.button("Logout", use_container_width=True, disabled=is_loading):
+            for key in [
+                "is_logged_in",
+                "user_id",
+                "role",
+                "username",
+                "nav_page",
+                "selected_session_id",
+                "admin_selected_session_label",
+                "theme",
+                "is_loading",
+            ]:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
