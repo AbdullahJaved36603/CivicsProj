@@ -36,6 +36,37 @@ def _parse_service_account_json(raw_json: str) -> dict | None:
     return None
 
 
+def _secrets_get(secrets: object, key: str) -> object | None:
+    if hasattr(secrets, "get"):
+        try:
+            return secrets.get(key)
+        except Exception:
+            pass
+    try:
+        return secrets[key]  # type: ignore[index]
+    except Exception:
+        return None
+
+
+def _coerce_mapping(value: object) -> dict | None:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return None
+
+    if hasattr(value, "keys"):
+        try:
+            return {str(k): value[k] for k in value.keys()}  # type: ignore[index]
+        except Exception:
+            pass
+
+    try:
+        candidate = dict(value)  # type: ignore[arg-type]
+    except Exception:
+        candidate = None
+    return candidate if isinstance(candidate, dict) else None
+
+
 def _load_service_account_info_from_env() -> dict | None:
     raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if raw_json:
@@ -70,17 +101,19 @@ def _load_service_account_info_from_streamlit_secrets() -> dict | None:
     # Preferred Streamlit Cloud format:
     # [gcp_service_account]
     # type = "service_account"
-    gcp_section = secrets.get("gcp_service_account") if hasattr(secrets, "get") else None
+    gcp_section = _secrets_get(secrets, "gcp_service_account")
     if gcp_section:
-        try:
-            section_dict = dict(gcp_section)
-        except Exception:
-            section_dict = None
+        section_dict = _coerce_mapping(gcp_section)
         if isinstance(section_dict, dict) and section_dict.get("client_email"):
             return section_dict
 
+    # Fallback: service account fields directly at top-level secrets.
+    top_level = _coerce_mapping(secrets)
+    if isinstance(top_level, dict) and top_level.get("client_email") and top_level.get("private_key"):
+        return top_level
+
     # Fallback: JSON text stored in Streamlit secrets.
-    raw_json = secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON") if hasattr(secrets, "get") else None
+    raw_json = _secrets_get(secrets, "GOOGLE_SERVICE_ACCOUNT_JSON")
     if isinstance(raw_json, str) and raw_json.strip():
         parsed = _parse_service_account_json(raw_json.strip())
         if parsed:

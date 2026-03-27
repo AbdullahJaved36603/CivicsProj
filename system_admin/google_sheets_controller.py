@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 import logging
 import os
 import re
@@ -71,6 +72,42 @@ def _response(success: bool, message: str, data: Optional[Dict[str, Any]] = None
     if data is not None:
         payload["data"] = data
     return payload
+
+
+def _load_runtime_service_account_info() -> Optional[Dict[str, Any]]:
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if raw_json:
+        try:
+            payload = json.loads(raw_json)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict) and payload.get("client_email"):
+            return payload
+
+    try:
+        streamlit = importlib.import_module("streamlit")
+        secrets = getattr(streamlit, "secrets", None)
+    except Exception:
+        secrets = None
+
+    if secrets is None:
+        return None
+
+    section = None
+    try:
+        section = secrets.get("gcp_service_account") if hasattr(secrets, "get") else secrets["gcp_service_account"]
+    except Exception:
+        section = None
+
+    if section is not None:
+        try:
+            mapping = {str(k): section[k] for k in section.keys()} if hasattr(section, "keys") else dict(section)
+        except Exception:
+            mapping = None
+        if isinstance(mapping, dict) and mapping.get("client_email"):
+            return mapping
+
+    return None
 
 
 def _load_external_function(function_name: str) -> Optional[Callable[..., Any]]:
@@ -620,12 +657,22 @@ class GoogleSheetsController:
                 self.service_account_info,
                 scopes=ALL_SCOPES,
             )
-        elif self.service_account_file:
+        else:
+            runtime_info = _load_runtime_service_account_info()
+            if isinstance(runtime_info, dict) and runtime_info:
+                self.service_account_info = runtime_info
+                credentials = Credentials.from_service_account_info(
+                    runtime_info,
+                    scopes=ALL_SCOPES,
+                )
+
+        if credentials is None and self.service_account_file and os.path.exists(self.service_account_file):
             credentials = Credentials.from_service_account_file(
                 self.service_account_file,
                 scopes=ALL_SCOPES,
             )
-        else:
+
+        if credentials is None:
             raise RuntimeError(
                 "Google credentials are not configured. Set GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_SERVICE_ACCOUNT_JSON, or Streamlit [gcp_service_account] secrets."
             )
