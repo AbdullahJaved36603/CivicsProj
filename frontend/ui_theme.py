@@ -156,6 +156,27 @@ def apply_theme() -> None:
         color: var(--sms-text) !important;
     }}
 
+    header[data-testid="stHeader"] {{
+        background: var(--sms-surface) !important;
+        border-bottom: 1px solid var(--sms-border) !important;
+    }}
+
+    [data-testid="stDecoration"] {{
+        background: var(--sms-primary) !important;
+    }}
+
+    [data-testid="stToolbar"] button,
+    [data-testid="stToolbar"] svg,
+    [data-testid="stStatusWidget"] *,
+    [data-testid="stMainMenu"] * {{
+        color: var(--sms-text) !important;
+        fill: var(--sms-text) !important;
+    }}
+
+    [data-testid="stAppViewContainer"] > .main {{
+        background: var(--sms-bg) !important;
+    }}
+
     .stMarkdown, .stText, .stCaption, .stAlert, p, span, label, h1, h2, h3, h4, h5, h6 {{
         color: inherit !important;
     }}
@@ -164,9 +185,57 @@ def apply_theme() -> None:
     div[data-testid="stMarkdownContainer"] li,
     div[data-testid="stMarkdownContainer"] strong,
     div[data-testid="stMetricLabel"] div,
-    div[data-testid="stMetricValue"] div,
+    div[data-testid="stMetricValue"] div {{
+        color: var(--sms-text) !important;
+    }}
+
+    div[data-testid="stDataFrame"],
+    div[data-testid="stTable"] {{
+        background: var(--sms-card) !important;
+        border: 1px solid var(--sms-border) !important;
+        border-radius: 12px !important;
+        overflow: hidden !important;
+    }}
+
     div[data-testid="stDataFrame"] * {{
         color: var(--sms-text) !important;
+        border-color: var(--sms-border) !important;
+    }}
+
+    div[data-testid="stDataFrame"] [role="columnheader"],
+    div[data-testid="stDataFrame"] [role="gridcell"],
+    div[data-testid="stDataFrame"] [class*="header"],
+    div[data-testid="stDataFrame"] [class*="cell"] {{
+        background: var(--sms-card) !important;
+    }}
+
+    div[data-testid="stDataFrame"] [class*="header"],
+    div[data-testid="stDataFrame"] [role="columnheader"] {{
+        background: var(--sms-surface) !important;
+        color: var(--sms-text) !important;
+    }}
+
+    div[data-testid="stDataFrame"] [class*="row"]:hover [class*="cell"],
+    div[data-testid="stDataFrame"] [role="row"]:hover [role="gridcell"] {{
+        background: color-mix(in srgb, var(--sms-primary) 12%, var(--sms-card)) !important;
+    }}
+
+    div[data-testid="stTable"] table {{
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--sms-card) !important;
+        color: var(--sms-text) !important;
+    }}
+
+    div[data-testid="stTable"] th,
+    div[data-testid="stTable"] td {{
+        border: 1px solid var(--sms-border) !important;
+        color: var(--sms-text) !important;
+        background: var(--sms-card) !important;
+    }}
+
+    div[data-testid="stTable"] th {{
+        background: var(--sms-surface) !important;
     }}
 
     section[data-testid="stSidebar"] {{
