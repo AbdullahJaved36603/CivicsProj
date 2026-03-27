@@ -20,7 +20,6 @@ TAB_ACCOUNTS = "Accounts"
 TAB_SESSIONS = "Sessions"
 TAB_SCHOOLS = "Schools"
 TAB_TEACHER_ASSIGNMENTS = "Teacher_Assignments"
-TAB_PRINCIPAL_ASSIGNMENTS = "principal_assignments"
 TAB_TEACHERS = "teachers"
 TAB_CLASSES = "classes"
 TAB_SUBJECTS = "subjects"
@@ -42,6 +41,7 @@ class SchoolColumns:
     SCHOOL_NAME = 1
     SESSION_ID = 2
     SCHOOL_SHEET_URL = 3
+    PRINCIPAL_ID = 4
 
 
 class TeacherAssignmentColumns:
@@ -49,12 +49,8 @@ class TeacherAssignmentColumns:
     CLASS_ID = 3
 
 
-class PrincipalAssignmentColumns:
-    SCHOOL_ID = 1
-
-
 class TeachersColumns:
-    SCHOOL_ID = 1
+    SCHOOL_ID = 2
 
 
 class ClassesColumns:
@@ -100,6 +96,20 @@ class SuperUserDashboard:
                 return session_id, session_name, folder_url
         return None
 
+    def _get_session_by_id(self, session_id: str) -> Optional[Tuple[str, str, str]]:
+        target = session_id.strip()
+        if not target:
+            return None
+        rows = self.controller.read_tab(TAB_SESSIONS)
+        for row in rows[1:]:
+            current_id = row[SessionColumns.SESSION_ID] if SessionColumns.SESSION_ID < len(row) else ""
+            if current_id != target:
+                continue
+            session_name = row[SessionColumns.SESSION_NAME] if SessionColumns.SESSION_NAME < len(row) else ""
+            folder_url = row[SessionColumns.FOLDER_URL] if SessionColumns.FOLDER_URL < len(row) else ""
+            return current_id, session_name, folder_url
+        return None
+
     def _find_school_row(self, school_id: str) -> Optional[Tuple[int, List[str]]]:
         rows = self.controller.read_tab(TAB_SCHOOLS)
         for row_index, row in enumerate(rows[1:], start=2):
@@ -119,15 +129,12 @@ class SuperUserDashboard:
         if assignment_count:
             dependencies[TAB_TEACHER_ASSIGNMENTS] = assignment_count
 
-        principal_assignments = self.controller.read_tab(TAB_PRINCIPAL_ASSIGNMENTS)
-        principal_count = sum(
-            1
-            for row in principal_assignments[1:]
-            if PrincipalAssignmentColumns.SCHOOL_ID < len(row)
-            and row[PrincipalAssignmentColumns.SCHOOL_ID] == school_id
-        )
-        if principal_count:
-            dependencies[TAB_PRINCIPAL_ASSIGNMENTS] = principal_count
+        school_match = self._find_school_row(school_id)
+        if school_match is not None:
+            _, school_row = school_match
+            assigned_principal_id = school_row[SchoolColumns.PRINCIPAL_ID] if SchoolColumns.PRINCIPAL_ID < len(school_row) else ""
+            if assigned_principal_id:
+                dependencies[f"{TAB_SCHOOLS}.principal_id"] = 1
 
         teachers = self.controller.read_tab(TAB_TEACHERS)
         teacher_count = sum(
@@ -164,18 +171,21 @@ class SuperUserDashboard:
 
         return dependencies
 
-    def create_school(self, name: str) -> Dict[str, Any]:
+    def create_school(self, name: str, session_id: str = "") -> Dict[str, Any]:
         try:
             school_name = name.strip()
             if not school_name:
                 return _response(False, "School name is required.")
 
             school_id = self.controller.generate_next_id("S", TAB_SCHOOLS, SchoolColumns.SCHOOL_ID)
-            active_session = self._get_active_session()
-            if not active_session:
+            selected_session_id = session_id.strip()
+            target_session = self._get_session_by_id(selected_session_id) if selected_session_id else self._get_active_session()
+            if not target_session:
+                if selected_session_id:
+                    return _response(False, "Selected session does not exist.")
                 return _response(False, "Cannot create school without an active session")
 
-            session_id, session_name, session_folder_url = active_session
+            resolved_session_id, session_name, session_folder_url = target_session
             folder_id = self.controller.get_folder_id_from_url(session_folder_url)
             if not folder_id:
                 return _response(False, "Active session folder URL is missing or invalid.")
@@ -200,7 +210,7 @@ class SuperUserDashboard:
             if not school_sheet_url:
                 return _response(False, "School spreadsheet URL was not returned by create_sheet.")
 
-            self.controller.append_row(TAB_SCHOOLS, [school_id, school_name, session_id, school_sheet_url])
+            self.controller.append_row(TAB_SCHOOLS, [school_id, school_name, resolved_session_id, school_sheet_url, ""])
             structure_result = self.school_manager.initialize_school_structure(
                 school_id=school_id,
                 school_name=school_name,
@@ -214,7 +224,7 @@ class SuperUserDashboard:
                     {
                         "school_id": school_id,
                         "school_name": school_name,
-                        "session_id": session_id,
+                        "session_id": resolved_session_id,
                         "session_name": session_name,
                         "school_sheet_url": school_sheet_url,
                         "session_folder_url": session_folder_url,
@@ -228,7 +238,7 @@ class SuperUserDashboard:
                 {
                     "school_id": school_id,
                     "school_name": school_name,
-                    "session_id": session_id,
+                    "session_id": resolved_session_id,
                     "session_name": session_name,
                     "school_sheet_url": school_sheet_url,
                     "session_folder_url": session_folder_url,
@@ -291,7 +301,11 @@ class SuperUserDashboard:
             accounts_rows = self.controller.read_tab(TAB_ACCOUNTS)
             schools_rows = self.controller.read_tab(TAB_SCHOOLS)
             sessions_rows = self.controller.read_tab(TAB_SESSIONS)
-            principal_rows = self.controller.read_tab(TAB_PRINCIPAL_ASSIGNMENTS)
+            principal_assigned_count = sum(
+                1
+                for row in schools_rows[1:]
+                if SchoolColumns.PRINCIPAL_ID < len(row) and row[SchoolColumns.PRINCIPAL_ID].strip()
+            )
 
             role_counts: Dict[str, int] = {}
             for row in accounts_rows[1:]:
@@ -315,7 +329,7 @@ class SuperUserDashboard:
                     "total_schools": max(0, len(schools_rows) - 1),
                     "total_sessions": max(0, len(sessions_rows) - 1),
                     "active_session": active_session,
-                    "principals_assigned": max(0, len(principal_rows) - 1),
+                    "principals_assigned": principal_assigned_count,
                     "user_roles": role_counts,
                 },
             )

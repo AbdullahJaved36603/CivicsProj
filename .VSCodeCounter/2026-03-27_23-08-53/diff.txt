@@ -1,0 +1,57 @@
+Date : 2026-03-27 23:08:53
+Directory : d:\CivicsFinal\frontend
+Total : 27 files,  -4707 codes, -11 comments, -770 blanks, all -5488 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| JSON     |          1 |        -13 |          0 |         -1 |        -14 |
+| Python   |         26 |     -4,694 |        -11 |       -769 |     -5,474 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++---------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                    | files      | code       | comment    | blank      | total      |
++---------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                       |         27 |     -4,707 |        -11 |       -770 |     -5,488 |
+| . (Files)                                               |          2 |         72 |          0 |         21 |         93 |
+| ..                                                      |         14 |     -6,102 |        -11 |     -1,083 |     -7,196 |
+| ..\system_admin                                         |         14 |     -6,102 |        -11 |     -1,083 |     -7,196 |
+| components                                              |          4 |        110 |          0 |         37 |        147 |
+| pages                                                   |          7 |      1,213 |          0 |        255 |      1,468 |
++---------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++---------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                | language | code       | comment    | blank      | total      |
++---------------------------------------------------------+----------+------------+------------+------------+------------+
+| d:\CivicsFinal\frontend\__init__.py                     | Python   |          0 |          0 |          1 |          1 |
+| d:\CivicsFinal\frontend\app.py                          | Python   |         72 |          0 |         20 |         92 |
+| d:\CivicsFinal\frontend\components\__init__.py          | Python   |          0 |          0 |          1 |          1 |
+| d:\CivicsFinal\frontend\components\forms.py             | Python   |         36 |          0 |         13 |         49 |
+| d:\CivicsFinal\frontend\components\sidebar.py           | Python   |         54 |          0 |         14 |         68 |
+| d:\CivicsFinal\frontend\components\tables.py            | Python   |         20 |          0 |          9 |         29 |
+| d:\CivicsFinal\frontend\pages\__init__.py               | Python   |          0 |          0 |          1 |          1 |
+| d:\CivicsFinal\frontend\pages\admin_dashboard.py        | Python   |        237 |          0 |         48 |        285 |
+| d:\CivicsFinal\frontend\pages\analytics_page.py         | Python   |        380 |          0 |         68 |        448 |
+| d:\CivicsFinal\frontend\pages\login_page.py             | Python   |         35 |          0 |         14 |         49 |
+| d:\CivicsFinal\frontend\pages\principal_dashboard.py    | Python   |        216 |          0 |         54 |        270 |
+| d:\CivicsFinal\frontend\pages\profile_settings.py       | Python   |         28 |          0 |          9 |         37 |
+| d:\CivicsFinal\frontend\pages\teacher_dashboard.py      | Python   |        317 |          0 |         61 |        378 |
+| d:\CivicsFinal\system_admin\Service.json                | JSON     |        -13 |          0 |         -1 |        -14 |
+| d:\CivicsFinal\system_admin\__init__.py                 | Python   |        -60 |          0 |         -2 |        -62 |
+| d:\CivicsFinal\system_admin\analytics_manager.py        | Python   |       -814 |          0 |       -114 |       -928 |
+| d:\CivicsFinal\system_admin\auth_utils.py               | Python   |       -208 |         -2 |        -54 |       -264 |
+| d:\CivicsFinal\system_admin\config.py                   | Python   |        -14 |         -4 |        -10 |        -28 |
+| d:\CivicsFinal\system_admin\google_sheets_controller.py | Python   |     -1,084 |         -3 |       -146 |     -1,233 |
+| d:\CivicsFinal\system_admin\google_sheets_utils.py      | Python   |       -131 |          0 |        -19 |       -150 |
+| d:\CivicsFinal\system_admin\principal_manager.py        | Python   |       -569 |          0 |       -116 |       -685 |
+| d:\CivicsFinal\system_admin\school_analytics.py         | Python   |       -194 |         -1 |        -35 |       -230 |
+| d:\CivicsFinal\system_admin\school_manager.py           | Python   |        -99 |         -1 |        -26 |       -126 |
+| d:\CivicsFinal\system_admin\service_layer.py            | Python   |       -985 |          0 |       -218 |     -1,203 |
+| d:\CivicsFinal\system_admin\session_manager.py          | Python   |       -735 |          0 |       -110 |       -845 |
+| d:\CivicsFinal\system_admin\super_user_dashboard.py     | Python   |       -296 |          0 |        -68 |       -364 |
+| d:\CivicsFinal\system_admin\teacher_manager.py          | Python   |       -900 |          0 |       -164 |     -1,064 |
+| Total                                                   |          |     -4,707 |        -11 |       -770 |     -5,488 |
++---------------------------------------------------------+----------+------------+------------+------------+------------+

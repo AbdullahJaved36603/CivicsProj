@@ -1,0 +1,40 @@
+Date : 2026-03-27 23:08:53
+Directory : d:\CivicsFinal\frontend
+Total : 13 files,  1395 codes, 0 comments, 313 blanks, all 1708 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| Python   |         13 |      1,395 |          0 |        313 |      1,708 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                 | files      | code       | comment    | blank      | total      |
++------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                    |         13 |      1,395 |          0 |        313 |      1,708 |
+| . (Files)                                            |          2 |         72 |          0 |         21 |         93 |
+| components                                           |          4 |        110 |          0 |         37 |        147 |
+| pages                                                |          7 |      1,213 |          0 |        255 |      1,468 |
++------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                             | language | code       | comment    | blank      | total      |
++------------------------------------------------------+----------+------------+------------+------------+------------+
+| d:\CivicsFinal\frontend\__init__.py                  | Python   |          0 |          0 |          1 |          1 |
+| d:\CivicsFinal\frontend\app.py                       | Python   |         72 |          0 |         20 |         92 |
+| d:\CivicsFinal\frontend\components\__init__.py       | Python   |          0 |          0 |          1 |          1 |
+| d:\CivicsFinal\frontend\components\forms.py          | Python   |         36 |          0 |         13 |         49 |
+| d:\CivicsFinal\frontend\components\sidebar.py        | Python   |         54 |          0 |         14 |         68 |
+| d:\CivicsFinal\frontend\components\tables.py         | Python   |         20 |          0 |          9 |         29 |
+| d:\CivicsFinal\frontend\pages\__init__.py            | Python   |          0 |          0 |          1 |          1 |
+| d:\CivicsFinal\frontend\pages\admin_dashboard.py     | Python   |        237 |          0 |         48 |        285 |
+| d:\CivicsFinal\frontend\pages\analytics_page.py      | Python   |        380 |          0 |         68 |        448 |
+| d:\CivicsFinal\frontend\pages\login_page.py          | Python   |         35 |          0 |         14 |         49 |
+| d:\CivicsFinal\frontend\pages\principal_dashboard.py | Python   |        216 |          0 |         54 |        270 |
+| d:\CivicsFinal\frontend\pages\profile_settings.py    | Python   |         28 |          0 |          9 |         37 |
+| d:\CivicsFinal\frontend\pages\teacher_dashboard.py   | Python   |        317 |          0 |         61 |        378 |
+| Total                                                |          |      1,395 |          0 |        313 |      1,708 |
++------------------------------------------------------+----------+------------+------------+------------+------------+

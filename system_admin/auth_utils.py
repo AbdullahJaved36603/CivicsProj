@@ -169,4 +169,95 @@ def authenticate(username: str, password: str) -> Dict[str, Any]:
 
         return _response(False, "Invalid username or password.")
     except Exception as exc:
+        error_text = str(exc)
+        if "Invalid JWT Signature" in error_text:
+            return _response(
+                False,
+                "Google service account key is invalid or revoked. Replace system_admin/Service.json with a fresh key for the configured service account.",
+            )
         return _response(False, f"Authentication failed: {exc}")
+
+
+def change_user_credentials(
+    user_id: str,
+    current_username: str,
+    current_password: str,
+    new_username: str,
+    new_password: str,
+) -> Dict[str, Any]:
+    normalized_user_id = user_id.strip()
+    if not normalized_user_id:
+        return _response(False, "user_id is required.")
+
+    if not current_username.strip():
+        return _response(False, "current_username is required.")
+    if not current_password.strip():
+        return _response(False, "current_password is required.")
+    if not new_password.strip():
+        return _response(False, "new_password is required.")
+
+    username_validation = validate_and_normalize_username(new_username)
+    if not username_validation.get("success"):
+        return _response(False, USERNAME_EMPTY_MESSAGE)
+    normalized_new_username = str(username_validation.get("data", {}).get("username", "")).strip()
+
+    auth_response = authenticate(current_username, current_password)
+    if not auth_response.get("success"):
+        return _response(False, "Current username or password is incorrect.")
+
+    authenticated_user_id = str(auth_response.get("data", {}).get("user_id", "")).strip()
+    if authenticated_user_id != normalized_user_id:
+        return _response(False, "Current credentials do not match the signed-in user.")
+
+    if _relational_fernet is None:
+        return _response(False, "Encryption service is unavailable.")
+
+    encrypt_method = getattr(_relational_fernet, "encrypt", None)
+    if not callable(encrypt_method):
+        return _response(False, "Encryption service is unavailable.")
+
+    try:
+        controller = get_controller()
+        rows = controller.read_tab(TAB_ACCOUNTS)
+
+        target_row_index: Optional[int] = None
+        target_row: List[str] = []
+        for row_index, row in enumerate(rows[1:], start=2):
+            row_user_id = row[AccountsColumns.USER_ID] if AccountsColumns.USER_ID < len(row) else ""
+            row_username = row[AccountsColumns.USERNAME] if AccountsColumns.USERNAME < len(row) else ""
+            if row_user_id != normalized_user_id and row_username.strip().lower() == normalized_new_username.lower():
+                return _response(False, "Username already exists")
+            if row_user_id == normalized_user_id:
+                target_row_index = row_index
+                target_row = row
+
+        if target_row_index is None:
+            return _response(False, "User does not exist.")
+
+        role = target_row[AccountsColumns.ROLE] if AccountsColumns.ROLE < len(target_row) else ""
+        status = target_row[AccountsColumns.STATUS] if AccountsColumns.STATUS < len(target_row) else ""
+
+        encrypted_password = encrypt_method(new_password.strip().encode())
+        encrypted_password_str = encrypted_password.decode() if isinstance(encrypted_password, bytes) else str(encrypted_password)
+
+        controller.update_row(
+            TAB_ACCOUNTS,
+            target_row_index,
+            [normalized_user_id, normalized_new_username, encrypted_password_str, role, status],
+        )
+        return _response(
+            True,
+            "Credentials updated successfully.",
+            {
+                "user_id": normalized_user_id,
+                "username": normalized_new_username,
+            },
+        )
+    except Exception as exc:
+        error_text = str(exc)
+        if "Invalid JWT Signature" in error_text:
+            return _response(
+                False,
+                "Google service account key is invalid or revoked. Replace system_admin/Service.json with a fresh key for the configured service account.",
+            )
+        return _response(False, f"Failed to change credentials: {exc}")

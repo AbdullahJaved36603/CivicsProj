@@ -1,0 +1,39 @@
+Date : 2026-03-27 23:08:33
+Directory : d:\CivicsFinal\system_admin
+Total : 14 files,  6102 codes, 11 comments, 1083 blanks, all 7196 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| Python   |         13 |      6,089 |         11 |      1,082 |      7,182 |
+| JSON     |          1 |         13 |          0 |          1 |         14 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++---------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                    | files      | code       | comment    | blank      | total      |
++---------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                       |         14 |      6,102 |         11 |      1,083 |      7,196 |
++---------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++---------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                | language | code       | comment    | blank      | total      |
++---------------------------------------------------------+----------+------------+------------+------------+------------+
+| d:\CivicsFinal\system_admin\Service.json                | JSON     |         13 |          0 |          1 |         14 |
+| d:\CivicsFinal\system_admin\__init__.py                 | Python   |         60 |          0 |          2 |         62 |
+| d:\CivicsFinal\system_admin\analytics_manager.py        | Python   |        814 |          0 |        114 |        928 |
+| d:\CivicsFinal\system_admin\auth_utils.py               | Python   |        208 |          2 |         54 |        264 |
+| d:\CivicsFinal\system_admin\config.py                   | Python   |         14 |          4 |         10 |         28 |
+| d:\CivicsFinal\system_admin\google_sheets_controller.py | Python   |      1,084 |          3 |        146 |      1,233 |
+| d:\CivicsFinal\system_admin\google_sheets_utils.py      | Python   |        131 |          0 |         19 |        150 |
+| d:\CivicsFinal\system_admin\principal_manager.py        | Python   |        569 |          0 |        116 |        685 |
+| d:\CivicsFinal\system_admin\school_analytics.py         | Python   |        194 |          1 |         35 |        230 |
+| d:\CivicsFinal\system_admin\school_manager.py           | Python   |         99 |          1 |         26 |        126 |
+| d:\CivicsFinal\system_admin\service_layer.py            | Python   |        985 |          0 |        218 |      1,203 |
+| d:\CivicsFinal\system_admin\session_manager.py          | Python   |        735 |          0 |        110 |        845 |
+| d:\CivicsFinal\system_admin\super_user_dashboard.py     | Python   |        296 |          0 |         68 |        364 |
+| d:\CivicsFinal\system_admin\teacher_manager.py          | Python   |        900 |          0 |        164 |      1,064 |
+| Total                                                   |          |      6,102 |         11 |      1,083 |      7,196 |
++---------------------------------------------------------+----------+------------+------------+------------+------------+

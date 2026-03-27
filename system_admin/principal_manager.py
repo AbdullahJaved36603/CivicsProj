@@ -29,9 +29,10 @@ except ImportError:
 
 TAB_ACCOUNTS = "Accounts"
 TAB_SCHOOLS = "Schools"
-TAB_PRINCIPAL_ASSIGNMENTS = "principal_assignments"
+TAB_SESSIONS = "Sessions"
 TAB_CLASSES = "classes"
 TAB_SUBJECTS = "subjects"
+TAB_TEACHERS = "teachers"
 
 
 class AccountsColumns:
@@ -47,11 +48,12 @@ class SchoolsColumns:
     SCHOOL_NAME = 1
     SESSION_ID = 2
     SCHOOL_SHEET_URL = 3
+    PRINCIPAL_ID = 4
 
 
-class PrincipalAssignmentColumns:
-    PRINCIPAL_ID = 0
-    SCHOOL_ID = 1
+class SessionColumns:
+    SESSION_ID = 0
+    IS_ACTIVE = 2
 
 
 class ClassesColumns:
@@ -59,12 +61,20 @@ class ClassesColumns:
     SCHOOL_ID = 1
     CLASS_NAME = 2
     CLASS_SECTION = 3
+    CLASS_INCHARGE_TEACHER_ID = 4
 
 
 class SubjectsColumns:
     SUBJECT_ID = 0
     CLASS_ID = 1
     SUBJECT_NAME = 2
+
+
+class TeachersColumns:
+    TEACHER_ID = 0
+    TEACHER_NAME = 1
+    SCHOOL_ID = 2
+    SESSION_ID = 3
 
 
 def _response(success: bool, message: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -78,6 +88,10 @@ class PrincipalManager:
     def __init__(self, controller: Optional[GoogleSheetsController] = None) -> None:
         self.controller = controller or get_controller()
 
+    @staticmethod
+    def _safe_get(row: List[str], index: int) -> str:
+        return row[index] if index < len(row) else ""
+
     def _school_exists(self, school_id: str) -> bool:
         rows = self.controller.read_tab(TAB_SCHOOLS)
         for row in rows[1:]:
@@ -85,18 +99,34 @@ class PrincipalManager:
                 return True
         return False
 
+    @staticmethod
+    def _is_active(value: str) -> bool:
+        return value.strip().lower() in {"1", "true", "yes", "active"}
+
+    def _get_active_session_id(self) -> Optional[str]:
+        rows = self.controller.read_tab(TAB_SESSIONS)
+        for row in rows[1:]:
+            session_id = row[SessionColumns.SESSION_ID] if SessionColumns.SESSION_ID < len(row) else ""
+            is_active = row[SessionColumns.IS_ACTIVE] if SessionColumns.IS_ACTIVE < len(row) else ""
+            if session_id and self._is_active(is_active):
+                return session_id
+        return None
+
+    def _school_is_in_active_session(self, school_id: str) -> bool:
+        school_row = self._get_school_row(school_id)
+        if school_row is None:
+            return False
+        school_session_id = school_row[SchoolsColumns.SESSION_ID] if SchoolsColumns.SESSION_ID < len(school_row) else ""
+        active_session_id = self._get_active_session_id()
+        if not active_session_id:
+            return False
+        return school_session_id == active_session_id
+
     def _username_exists(self, username: str) -> bool:
         rows = self.controller.read_tab(TAB_ACCOUNTS)
         target = username.strip().lower()
         for row in rows[1:]:
             if AccountsColumns.USERNAME < len(row) and row[AccountsColumns.USERNAME].strip().lower() == target:
-                return True
-        return False
-
-    def _school_has_principal(self, school_id: str) -> bool:
-        rows = self.controller.read_tab(TAB_PRINCIPAL_ASSIGNMENTS)
-        for row in rows[1:]:
-            if PrincipalAssignmentColumns.SCHOOL_ID < len(row) and row[PrincipalAssignmentColumns.SCHOOL_ID] == school_id:
                 return True
         return False
 
@@ -115,20 +145,26 @@ class PrincipalManager:
             return False
         return account_row[AccountsColumns.ROLE].strip().lower() == "principal"
 
-    def _principal_already_assigned(self, principal_id: str) -> bool:
-        rows = self.controller.read_tab(TAB_PRINCIPAL_ASSIGNMENTS)
+    def _get_principal_school_ids(self, principal_id: str, active_only: bool = True) -> List[str]:
+        rows = self.controller.read_tab(TAB_SCHOOLS)
+        active_session_id = self._get_active_session_id() if active_only else ""
+        school_ids: List[str] = []
         for row in rows[1:]:
-            if PrincipalAssignmentColumns.PRINCIPAL_ID < len(row) and row[PrincipalAssignmentColumns.PRINCIPAL_ID] == principal_id:
-                return True
-        return False
+            row_principal_id = self._safe_get(row, SchoolsColumns.PRINCIPAL_ID)
+            if row_principal_id != principal_id:
+                continue
+            if active_only:
+                row_session_id = self._safe_get(row, SchoolsColumns.SESSION_ID)
+                if not active_session_id or row_session_id != active_session_id:
+                    continue
+            school_id = self._safe_get(row, SchoolsColumns.SCHOOL_ID)
+            if school_id:
+                school_ids.append(school_id)
+        return school_ids
 
-    def _get_principal_school_id(self, principal_id: str) -> Optional[str]:
-        rows = self.controller.read_tab(TAB_PRINCIPAL_ASSIGNMENTS)
-        for row in rows[1:]:
-            if PrincipalAssignmentColumns.PRINCIPAL_ID < len(row) and row[PrincipalAssignmentColumns.PRINCIPAL_ID] == principal_id:
-                if PrincipalAssignmentColumns.SCHOOL_ID < len(row):
-                    return row[PrincipalAssignmentColumns.SCHOOL_ID]
-        return None
+    def _principal_has_school_access(self, principal_id: str, school_id: str) -> bool:
+        assigned_school_ids = set(self._get_principal_school_ids(principal_id, active_only=True))
+        return school_id in assigned_school_ids
 
     def _get_school_row(self, school_id: str) -> Optional[List[str]]:
         rows = self.controller.read_tab(TAB_SCHOOLS)
@@ -136,6 +172,16 @@ class PrincipalManager:
             if SchoolsColumns.SCHOOL_ID < len(row) and row[SchoolsColumns.SCHOOL_ID] == school_id:
                 return row
         return None
+
+    def _build_school_row(self, school_row: List[str], principal_id: str) -> List[str]:
+        school_id = self._safe_get(school_row, SchoolsColumns.SCHOOL_ID)
+        school_name = self._safe_get(school_row, SchoolsColumns.SCHOOL_NAME)
+        session_id = self._safe_get(school_row, SchoolsColumns.SESSION_ID)
+        school_sheet_url = self._safe_get(school_row, SchoolsColumns.SCHOOL_SHEET_URL)
+        updated_row = [school_id, school_name, session_id, school_sheet_url, principal_id]
+        if len(school_row) > len(updated_row):
+            updated_row.extend(school_row[len(updated_row) :])
+        return updated_row
 
     def _find_class_row(self, class_id: str) -> Optional[Tuple[int, List[str]]]:
         rows = self.controller.read_tab(TAB_CLASSES)
@@ -169,6 +215,30 @@ class PrincipalManager:
             if row_subject_name.strip().lower() == target_name:
                 return True
         return False
+
+    def _teacher_belongs_to_school(self, teacher_id: str, school_id: str) -> bool:
+        active_session_id = self._get_active_session_id()
+        if not active_session_id:
+            return False
+
+        rows = self.controller.read_tab(TAB_TEACHERS)
+        for row in rows[1:]:
+            row_teacher_id = row[TeachersColumns.TEACHER_ID] if TeachersColumns.TEACHER_ID < len(row) else ""
+            row_school_id = row[TeachersColumns.SCHOOL_ID] if TeachersColumns.SCHOOL_ID < len(row) else ""
+            row_session_id = row[TeachersColumns.SESSION_ID] if TeachersColumns.SESSION_ID < len(row) else ""
+            if row_teacher_id == teacher_id and row_school_id == school_id and row_session_id == active_session_id:
+                return True
+        return False
+
+    @staticmethod
+    def _serialize_class_row(
+        class_id: str,
+        school_id: str,
+        class_name: str,
+        class_section: str,
+        class_incharge_teacher_id: str,
+    ) -> List[str]:
+        return [class_id, school_id, class_name, class_section, class_incharge_teacher_id]
 
     def _encrypt_password(self, plain_password: str) -> str:
         if relational_fernet is None:
@@ -215,7 +285,7 @@ class PrincipalManager:
         except Exception as exc:
             return _response(False, f"Failed to create principal: {exc}")
 
-    def assign_principal_to_school(self, principal_id: str, school_id: str) -> Dict[str, Any]:
+    def assign_principal_to_school(self, principal_id: str, school_id: str, replace_existing: bool = False) -> Dict[str, Any]:
         try:
             normalized_principal_id = principal_id.strip()
             normalized_school_id = school_id.strip()
@@ -228,14 +298,38 @@ class PrincipalManager:
                 return _response(False, "Invalid principal_id. Principal account does not exist.")
             if not self._school_exists(normalized_school_id):
                 return _response(False, "Invalid school_id. School does not exist.")
-            if self._school_has_principal(normalized_school_id):
-                return _response(False, "This school already has an assigned principal.")
-            if self._principal_already_assigned(normalized_principal_id):
-                return _response(False, "This principal is already assigned to a school.")
 
-            self.controller.append_row(
-                TAB_PRINCIPAL_ASSIGNMENTS,
-                [normalized_principal_id, normalized_school_id],
+            school_row_index: Optional[int] = None
+            school_row: Optional[List[str]] = None
+            schools_rows = self.controller.read_tab(TAB_SCHOOLS)
+            for row_index, row in enumerate(schools_rows[1:], start=2):
+                row_school_id = self._safe_get(row, SchoolsColumns.SCHOOL_ID)
+                if row_school_id == normalized_school_id:
+                    school_row_index = row_index
+                    school_row = row
+                    break
+
+            if school_row_index is None or school_row is None:
+                return _response(False, "Invalid school_id. School does not exist.")
+
+            existing_principal_id = self._safe_get(school_row, SchoolsColumns.PRINCIPAL_ID)
+            if existing_principal_id and existing_principal_id != normalized_principal_id and not replace_existing:
+                return _response(False, "This school already has an assigned principal.")
+
+            if existing_principal_id == normalized_principal_id:
+                return _response(
+                    True,
+                    "Principal already assigned to this school.",
+                    {
+                        "principal_id": normalized_principal_id,
+                        "school_id": normalized_school_id,
+                    },
+                )
+
+            self.controller.update_row(
+                TAB_SCHOOLS,
+                school_row_index,
+                self._build_school_row(school_row, normalized_principal_id),
             )
 
             return _response(
@@ -249,14 +343,17 @@ class PrincipalManager:
         except Exception as exc:
             return _response(False, f"Failed to assign principal to school: {exc}")
 
-    def create_class(self, principal_id: str, class_name: str, section: str) -> Dict[str, Any]:
+    def create_class(self, principal_id: str, school_id: str, class_name: str, section: str) -> Dict[str, Any]:
         try:
             normalized_principal_id = principal_id.strip()
+            normalized_school_id = school_id.strip()
             normalized_class_name = class_name.strip()
             normalized_section = section.strip()
 
             if not normalized_principal_id:
                 return _response(False, "principal_id is required.")
+            if not normalized_school_id:
+                return _response(False, "school_id is required.")
             if not normalized_class_name:
                 return _response(False, "class_name is required.")
             if not normalized_section:
@@ -264,14 +361,13 @@ class PrincipalManager:
             if not self._is_principal_user(normalized_principal_id):
                 return _response(False, "Invalid principal_id. Principal account does not exist.")
 
-            school_id = self._get_principal_school_id(normalized_principal_id)
-            if not school_id:
-                return _response(False, "Principal is not assigned to any school.")
+            if not self._principal_has_school_access(normalized_principal_id, normalized_school_id):
+                return _response(False, "Access denied")
 
-            if self._class_exists_in_school(school_id, normalized_class_name, normalized_section):
+            if self._class_exists_in_school(normalized_school_id, normalized_class_name, normalized_section):
                 return _response(False, "Class with the same name and section already exists in this school.")
 
-            school_row = self._get_school_row(school_id)
+            school_row = self._get_school_row(normalized_school_id)
             if school_row is None:
                 return _response(False, "Principal school does not exist.")
 
@@ -283,7 +379,10 @@ class PrincipalManager:
                 return _response(False, "School spreadsheet URL is missing or invalid.")
 
             class_id = self.controller.generate_next_id("C", TAB_CLASSES, ClassesColumns.CLASS_ID)
-            self.controller.append_row(TAB_CLASSES, [class_id, school_id, normalized_class_name, normalized_section])
+            self.controller.append_row(
+                TAB_CLASSES,
+                self._serialize_class_row(class_id, normalized_school_id, normalized_class_name, normalized_section, ""),
+            )
 
             tab_name = f"{normalized_class_name}-{normalized_section}"
             tab_result = self.controller.create_class_tab(spreadsheet_id, tab_name)
@@ -298,28 +397,30 @@ class PrincipalManager:
                 "Class created successfully.",
                 {
                     "class_id": class_id,
-                    "school_id": school_id,
+                    "school_id": normalized_school_id,
                     "tab_name": tab_name,
                 },
             )
         except Exception as exc:
             return _response(False, f"Failed to create class: {exc}")
 
-    def delete_class(self, principal_id: str, class_id: str) -> Dict[str, Any]:
+    def delete_class(self, principal_id: str, school_id: str, class_id: str) -> Dict[str, Any]:
         try:
             normalized_principal_id = principal_id.strip()
+            normalized_school_id = school_id.strip()
             normalized_class_id = class_id.strip()
 
             if not normalized_principal_id:
                 return _response(False, "principal_id is required.")
+            if not normalized_school_id:
+                return _response(False, "school_id is required.")
             if not normalized_class_id:
                 return _response(False, "class_id is required.")
             if not self._is_principal_user(normalized_principal_id):
                 return _response(False, "Invalid principal_id. Principal account does not exist.")
 
-            school_id = self._get_principal_school_id(normalized_principal_id)
-            if not school_id:
-                return _response(False, "Principal is not assigned to any school.")
+            if not self._principal_has_school_access(normalized_principal_id, normalized_school_id):
+                return _response(False, "Access denied")
 
             class_found = self._find_class_row(normalized_class_id)
             if class_found is None:
@@ -327,14 +428,14 @@ class PrincipalManager:
 
             row_index, class_row = class_found
             class_school_id = class_row[ClassesColumns.SCHOOL_ID] if ClassesColumns.SCHOOL_ID < len(class_row) else ""
-            if class_school_id != school_id:
+            if class_school_id != normalized_school_id:
                 return _response(False, "Class not found in your school.")
 
             class_name = class_row[ClassesColumns.CLASS_NAME] if ClassesColumns.CLASS_NAME < len(class_row) else ""
             class_section = class_row[ClassesColumns.CLASS_SECTION] if ClassesColumns.CLASS_SECTION < len(class_row) else ""
             tab_name = f"{class_name}-{class_section}"
 
-            school_row = self._get_school_row(school_id)
+            school_row = self._get_school_row(normalized_school_id)
             if school_row is None:
                 return _response(False, "Principal school does not exist.")
 
@@ -365,14 +466,17 @@ class PrincipalManager:
         except Exception as exc:
             return _response(False, f"Failed to delete class: {exc}")
 
-    def create_subject(self, principal_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
+    def create_subject(self, principal_id: str, school_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
         try:
             normalized_principal_id = principal_id.strip()
+            normalized_school_id = school_id.strip()
             normalized_class_id = class_id.strip()
             normalized_subject_name = subject_name.strip()
 
             if not normalized_principal_id:
                 return _response(False, "principal_id is required.")
+            if not normalized_school_id:
+                return _response(False, "school_id is required.")
             if not normalized_class_id:
                 return _response(False, "class_id is required.")
             if not normalized_subject_name:
@@ -380,9 +484,8 @@ class PrincipalManager:
             if not self._is_principal_user(normalized_principal_id):
                 return _response(False, "Invalid principal_id. Principal account does not exist.")
 
-            school_id = self._get_principal_school_id(normalized_principal_id)
-            if not school_id:
-                return _response(False, "Principal is not assigned to any school.")
+            if not self._principal_has_school_access(normalized_principal_id, normalized_school_id):
+                return _response(False, "Access denied")
 
             class_found = self._find_class_row(normalized_class_id)
             if class_found is None:
@@ -390,7 +493,7 @@ class PrincipalManager:
 
             _, class_row = class_found
             class_school_id = class_row[ClassesColumns.SCHOOL_ID] if ClassesColumns.SCHOOL_ID < len(class_row) else ""
-            if class_school_id != school_id:
+            if class_school_id != normalized_school_id:
                 return _response(False, "Class does not belong to your school.")
 
             if self._subject_exists_in_class(normalized_class_id, normalized_subject_name):
@@ -410,6 +513,138 @@ class PrincipalManager:
         except Exception as exc:
             return _response(False, f"Failed to create subject: {exc}")
 
+    def assign_class_incharge(self, principal_id: str, school_id: str, class_id: str, teacher_id: str) -> Dict[str, Any]:
+        try:
+            normalized_principal_id = principal_id.strip()
+            normalized_school_id = school_id.strip()
+            normalized_class_id = class_id.strip()
+            normalized_teacher_id = teacher_id.strip()
+
+            if not normalized_principal_id:
+                return _response(False, "principal_id is required.")
+            if not normalized_school_id:
+                return _response(False, "school_id is required.")
+            if not normalized_class_id:
+                return _response(False, "class_id is required.")
+            if not normalized_teacher_id:
+                return _response(False, "teacher_id is required.")
+            if not self._is_principal_user(normalized_principal_id):
+                return _response(False, "Invalid principal_id. Principal account does not exist.")
+
+            if not self._principal_has_school_access(normalized_principal_id, normalized_school_id):
+                return _response(False, "Access denied")
+            if not self._teacher_belongs_to_school(normalized_teacher_id, normalized_school_id):
+                return _response(False, "Teacher not found in your school.")
+
+            class_found = self._find_class_row(normalized_class_id)
+            if class_found is None:
+                return _response(False, "Class does not exist.")
+
+            class_row_index, class_row = class_found
+            class_school_id = class_row[ClassesColumns.SCHOOL_ID] if ClassesColumns.SCHOOL_ID < len(class_row) else ""
+            if class_school_id != normalized_school_id:
+                return _response(False, "Class does not belong to your school.")
+
+            all_classes = self.controller.read_tab(TAB_CLASSES)
+            for row in all_classes[1:]:
+                existing_class_id = row[ClassesColumns.CLASS_ID] if ClassesColumns.CLASS_ID < len(row) else ""
+                existing_school_id = row[ClassesColumns.SCHOOL_ID] if ClassesColumns.SCHOOL_ID < len(row) else ""
+                existing_incharge = (
+                    row[ClassesColumns.CLASS_INCHARGE_TEACHER_ID]
+                    if ClassesColumns.CLASS_INCHARGE_TEACHER_ID < len(row)
+                    else ""
+                )
+                if existing_class_id == normalized_class_id:
+                    continue
+                if existing_school_id != normalized_school_id:
+                    continue
+                if existing_incharge == normalized_teacher_id:
+                    return _response(False, "Teacher is already class incharge for another class.")
+
+            class_name = class_row[ClassesColumns.CLASS_NAME] if ClassesColumns.CLASS_NAME < len(class_row) else ""
+            class_section = class_row[ClassesColumns.CLASS_SECTION] if ClassesColumns.CLASS_SECTION < len(class_row) else ""
+
+            self.controller.update_row(
+                TAB_CLASSES,
+                class_row_index,
+                self._serialize_class_row(
+                    normalized_class_id,
+                    normalized_school_id,
+                    class_name,
+                    class_section,
+                    normalized_teacher_id,
+                ),
+            )
+
+            return _response(
+                True,
+                "Class incharge assigned successfully.",
+                {
+                    "class_id": normalized_class_id,
+                    "teacher_id": normalized_teacher_id,
+                },
+            )
+        except Exception as exc:
+            return _response(False, f"Failed to assign class incharge: {exc}")
+
+    def deassign_class_incharge(self, principal_id: str, school_id: str, class_id: str) -> Dict[str, Any]:
+        try:
+            normalized_principal_id = principal_id.strip()
+            normalized_school_id = school_id.strip()
+            normalized_class_id = class_id.strip()
+
+            if not normalized_principal_id:
+                return _response(False, "principal_id is required.")
+            if not normalized_school_id:
+                return _response(False, "school_id is required.")
+            if not normalized_class_id:
+                return _response(False, "class_id is required.")
+            if not self._is_principal_user(normalized_principal_id):
+                return _response(False, "Invalid principal_id. Principal account does not exist.")
+
+            if not self._principal_has_school_access(normalized_principal_id, normalized_school_id):
+                return _response(False, "Access denied")
+
+            class_found = self._find_class_row(normalized_class_id)
+            if class_found is None:
+                return _response(False, "Class does not exist.")
+
+            class_row_index, class_row = class_found
+            class_school_id = class_row[ClassesColumns.SCHOOL_ID] if ClassesColumns.SCHOOL_ID < len(class_row) else ""
+            if class_school_id != normalized_school_id:
+                return _response(False, "Class does not belong to your school.")
+
+            class_name = class_row[ClassesColumns.CLASS_NAME] if ClassesColumns.CLASS_NAME < len(class_row) else ""
+            class_section = class_row[ClassesColumns.CLASS_SECTION] if ClassesColumns.CLASS_SECTION < len(class_row) else ""
+            current_incharge = (
+                class_row[ClassesColumns.CLASS_INCHARGE_TEACHER_ID]
+                if ClassesColumns.CLASS_INCHARGE_TEACHER_ID < len(class_row)
+                else ""
+            )
+            if not current_incharge:
+                return _response(False, "Class does not have an assigned incharge.")
+
+            self.controller.update_row(
+                TAB_CLASSES,
+                class_row_index,
+                self._serialize_class_row(
+                    normalized_class_id,
+                    normalized_school_id,
+                    class_name,
+                    class_section,
+                    "",
+                ),
+            )
+            return _response(
+                True,
+                "Class incharge removed successfully.",
+                {
+                    "class_id": normalized_class_id,
+                },
+            )
+        except Exception as exc:
+            return _response(False, f"Failed to remove class incharge: {exc}")
+
 
 _MANAGER: Optional[PrincipalManager] = None
 
@@ -425,17 +660,25 @@ def create_principal(username: str) -> Dict[str, Any]:
     return get_principal_manager().create_principal(username)
 
 
-def assign_principal_to_school(principal_id: str, school_id: str) -> Dict[str, Any]:
-    return get_principal_manager().assign_principal_to_school(principal_id, school_id)
+def assign_principal_to_school(principal_id: str, school_id: str, replace_existing: bool = False) -> Dict[str, Any]:
+    return get_principal_manager().assign_principal_to_school(principal_id, school_id, replace_existing=replace_existing)
 
 
-def create_class(principal_id: str, class_name: str, section: str) -> Dict[str, Any]:
-    return get_principal_manager().create_class(principal_id, class_name, section)
+def create_class(principal_id: str, school_id: str, class_name: str, section: str) -> Dict[str, Any]:
+    return get_principal_manager().create_class(principal_id, school_id, class_name, section)
 
 
-def delete_class(principal_id: str, class_id: str) -> Dict[str, Any]:
-    return get_principal_manager().delete_class(principal_id, class_id)
+def delete_class(principal_id: str, school_id: str, class_id: str) -> Dict[str, Any]:
+    return get_principal_manager().delete_class(principal_id, school_id, class_id)
 
 
-def create_subject(principal_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
-    return get_principal_manager().create_subject(principal_id, class_id, subject_name)
+def create_subject(principal_id: str, school_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
+    return get_principal_manager().create_subject(principal_id, school_id, class_id, subject_name)
+
+
+def assign_class_incharge(principal_id: str, school_id: str, class_id: str, teacher_id: str) -> Dict[str, Any]:
+    return get_principal_manager().assign_class_incharge(principal_id, school_id, class_id, teacher_id)
+
+
+def deassign_class_incharge(principal_id: str, school_id: str, class_id: str) -> Dict[str, Any]:
+    return get_principal_manager().deassign_class_incharge(principal_id, school_id, class_id)

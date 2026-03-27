@@ -1,0 +1,16 @@
+"filename", "language", "Python", "JSON", "comment", "blank", "total"
+"d:\CivicsFinal\system_admin\Service.json", "JSON", 0, 13, 0, 1, 14
+"d:\CivicsFinal\system_admin\__init__.py", "Python", 60, 0, 0, 2, 62
+"d:\CivicsFinal\system_admin\analytics_manager.py", "Python", 814, 0, 0, 114, 928
+"d:\CivicsFinal\system_admin\auth_utils.py", "Python", 208, 0, 2, 54, 264
+"d:\CivicsFinal\system_admin\config.py", "Python", 14, 0, 4, 10, 28
+"d:\CivicsFinal\system_admin\google_sheets_controller.py", "Python", 1084, 0, 3, 146, 1233
+"d:\CivicsFinal\system_admin\google_sheets_utils.py", "Python", 131, 0, 0, 19, 150
+"d:\CivicsFinal\system_admin\principal_manager.py", "Python", 569, 0, 0, 116, 685
+"d:\CivicsFinal\system_admin\school_analytics.py", "Python", 194, 0, 1, 35, 230
+"d:\CivicsFinal\system_admin\school_manager.py", "Python", 99, 0, 1, 26, 126
+"d:\CivicsFinal\system_admin\service_layer.py", "Python", 985, 0, 0, 218, 1203
+"d:\CivicsFinal\system_admin\session_manager.py", "Python", 735, 0, 0, 110, 845
+"d:\CivicsFinal\system_admin\super_user_dashboard.py", "Python", 296, 0, 0, 68, 364
+"d:\CivicsFinal\system_admin\teacher_manager.py", "Python", 900, 0, 0, 164, 1064
+"Total", "-", 6089, 13, 11, 1083, 7196
