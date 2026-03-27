@@ -15,6 +15,7 @@ try:
         ACCOUNTS_SHEET_ID,
         HARDCODED_EDITOR_EMAIL,
         RESOLVED_SERVICE_ACCOUNT_FILE,
+        RESOLVED_SERVICE_ACCOUNT_INFO,
         SCOPES,
         WEB_APP_URL,
     )
@@ -23,6 +24,7 @@ except ImportError:
         ACCOUNTS_SHEET_ID,
         HARDCODED_EDITOR_EMAIL,
         RESOLVED_SERVICE_ACCOUNT_FILE,
+        RESOLVED_SERVICE_ACCOUNT_INFO,
         SCOPES,
         WEB_APP_URL,
     )
@@ -103,6 +105,7 @@ class GoogleSheetsController:
         self,
         master_spreadsheet_id: Optional[str] = None,
         service_account_file: Optional[str] = None,
+        service_account_info: Optional[Dict[str, Any]] = None,
         web_app_url: Optional[str] = None,
     ) -> None:
         self.master_spreadsheet_id = master_spreadsheet_id or os.getenv("MASTER_SPREADSHEET_ID", ACCOUNTS_SHEET_ID)
@@ -110,6 +113,7 @@ class GoogleSheetsController:
             "GOOGLE_SERVICE_ACCOUNT_FILE",
             RESOLVED_SERVICE_ACCOUNT_FILE,
         )
+        self.service_account_info = service_account_info or RESOLVED_SERVICE_ACCOUNT_INFO
         self.web_app_url = web_app_url or os.getenv("GOOGLE_APPS_SCRIPT_WEB_APP_URL", WEB_APP_URL)
         self.editor_email = HARDCODED_EDITOR_EMAIL
         self._service: Any = None
@@ -601,8 +605,6 @@ class GoogleSheetsController:
             return self._service
         if not self.master_spreadsheet_id:
             raise RuntimeError("MASTER_SPREADSHEET_ID is not configured.")
-        if not self.service_account_file:
-            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_FILE is not configured.")
 
         try:
             credentials_module = importlib.import_module("google.oauth2.service_account")
@@ -612,10 +614,22 @@ class GoogleSheetsController:
         except Exception as exc:  # pragma: no cover - import failure depends on environment
             raise RuntimeError("Google API dependencies are missing.") from exc
 
-        credentials = Credentials.from_service_account_file(
-            self.service_account_file,
-            scopes=ALL_SCOPES,
-        )
+        credentials = None
+        if isinstance(self.service_account_info, dict) and self.service_account_info:
+            credentials = Credentials.from_service_account_info(
+                self.service_account_info,
+                scopes=ALL_SCOPES,
+            )
+        elif self.service_account_file:
+            credentials = Credentials.from_service_account_file(
+                self.service_account_file,
+                scopes=ALL_SCOPES,
+            )
+        else:
+            raise RuntimeError(
+                "Google credentials are not configured. Set GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_SERVICE_ACCOUNT_JSON, or Streamlit [gcp_service_account] secrets."
+            )
+
         self._service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
         return self._service
 

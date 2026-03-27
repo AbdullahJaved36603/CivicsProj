@@ -1,1 +1,11 @@
 .venv
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local secrets and environment files
+system_admin/Service.json
+.env
+
+# Local VS Code metrics output
+.VSCodeCounter/
