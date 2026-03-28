@@ -403,6 +403,63 @@ def _safe_excel_sheet_name(base_name: str, used: set[str]) -> str:
     return candidate
 
 
+def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str, List[Dict[str, Any]]]) -> Tuple[bytes | None, str | None]:
+    engine_candidates = ["xlsxwriter", "openpyxl", None]
+    last_error: str | None = None
+
+    for engine in engine_candidates:
+        try:
+            buffer = BytesIO()
+            used_sheet_names: set[str] = set()
+            writer_kwargs = {"engine": engine} if engine else {}
+            with pd.ExcelWriter(buffer, **writer_kwargs) as writer:
+                for section in sections:
+                    section_rows = export_sheets.get(section, [])
+                    if section_rows:
+                        section_df = pd.DataFrame(section_rows)
+                    else:
+                        section_df = pd.DataFrame(
+                            [
+                                {
+                                    "School": "No data available",
+                                    "Subject": "No data available",
+                                    "Teacher": "-",
+                                    "Total": 0,
+                                    "Appeared": 0,
+                                    "Absent": 0,
+                                    "Passed": 0,
+                                    "Failed": 0,
+                                    "Pass %": 0.0,
+                                    "Fail %": 0.0,
+                                }
+                            ]
+                        )
+
+                    ordered_export_cols = [
+                        "School",
+                        "Subject",
+                        "Teacher",
+                        "Total",
+                        "Appeared",
+                        "Absent",
+                        "Passed",
+                        "Failed",
+                        "Pass %",
+                        "Fail %",
+                    ]
+                    export_columns = [col for col in ordered_export_cols if col in section_df.columns]
+                    section_df = section_df[export_columns] if export_columns else section_df
+
+                    sheet_name = _safe_excel_sheet_name(str(section), used_sheet_names)
+                    section_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            return buffer.getvalue(), None
+        except (ImportError, ModuleNotFoundError, ValueError) as exc:
+            last_error = str(exc)
+
+    return None, last_error
+
+
 def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
     with card("Global Analytics", "Hierarchical class-section analytics grouped by school"):
         if not selected_session_id:
@@ -520,52 +577,16 @@ def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
             sections = sorted(export_sheets.keys())
 
         if sections:
-            buffer = BytesIO()
-            used_sheet_names: set[str] = set()
-            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                for section in sections:
-                    section_rows = export_sheets.get(section, [])
-                    if section_rows:
-                        section_df = pd.DataFrame(section_rows)
-                    else:
-                        section_df = pd.DataFrame(
-                            [
-                                {
-                                    "School": "No data available",
-                                    "Subject": "No data available",
-                                    "Teacher": "-",
-                                    "Total": 0,
-                                    "Appeared": 0,
-                                    "Absent": 0,
-                                    "Passed": 0,
-                                    "Failed": 0,
-                                    "Pass %": 0.0,
-                                    "Fail %": 0.0,
-                                }
-                            ]
-                        )
-
-                    ordered_export_cols = [
-                        "School",
-                        "Subject",
-                        "Teacher",
-                        "Total",
-                        "Appeared",
-                        "Absent",
-                        "Passed",
-                        "Failed",
-                        "Pass %",
-                        "Fail %",
-                    ]
-                    export_columns = [col for col in ordered_export_cols if col in section_df.columns]
-                    section_df = section_df[export_columns] if export_columns else section_df
-
-                    sheet_name = _safe_excel_sheet_name(str(section), used_sheet_names)
-                    section_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            workbook_bytes, error_message = _build_admin_analytics_workbook(sections, export_sheets)
+            if workbook_bytes is None:
+                st.error("Unable to generate Excel report. Please install 'xlsxwriter' or 'openpyxl' in deployment.")
+                if error_message:
+                    st.caption(f"Export engine error: {error_message}")
+                return
 
             st.download_button(
                 label="Download Analytics Report",
-                data=buffer.getvalue(),
+                data=workbook_bytes,
                 file_name="admin_class_analytics.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
