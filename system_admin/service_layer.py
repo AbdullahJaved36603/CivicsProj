@@ -1042,6 +1042,38 @@ def get_all_school_analytics(
     )
 
 
+def get_admin_class_hierarchical_analytics(
+    admin_id: str,
+    session_id: str = "",
+    exam_session_id: str = "",
+    class_name: str = "",
+) -> Dict[str, Any]:
+    auth_check = _require_role(admin_id, "admin")
+    if not auth_check.get("success"):
+        return auth_check
+
+    normalized_session_id = session_id.strip() or (_get_active_session_id() or "")
+    if not normalized_session_id:
+        return _response(False, "No session selected.")
+
+    normalized_exam_session_id = exam_session_id.strip()
+    if not normalized_exam_session_id:
+        return _response(False, "exam_session_id is required.")
+
+    resolved_exam_session_id, error_message = _resolve_exam_session_id(
+        normalized_session_id,
+        normalized_exam_session_id,
+    )
+    if error_message:
+        return _response(False, error_message)
+
+    return get_analytics_manager().get_admin_hierarchical_class_analytics(
+        normalized_session_id,
+        resolved_exam_session_id,
+        class_name,
+    )
+
+
 def get_school_analytics_for_principal(
     principal_id: str,
     school_id: str,

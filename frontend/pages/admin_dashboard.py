@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any, Callable, Dict, List, Tuple
 
+import pandas as pd
 import streamlit as st
 
 from frontend.components.forms import build_option_map, get_select_value, show_form_result
@@ -386,6 +388,191 @@ def _render_principal_management(admin_id: str, selected_session_id: str) -> Non
         show_records("Principals", principals)
 
 
+def _safe_excel_sheet_name(base_name: str, used: set[str]) -> str:
+    sanitized = "".join(ch for ch in str(base_name) if ch not in "[]:*?/\\").strip()
+    if not sanitized:
+        sanitized = "Sheet"
+
+    candidate = sanitized[:31]
+    counter = 1
+    while candidate in used:
+        suffix = f"_{counter}"
+        candidate = f"{sanitized[: max(1, 31 - len(suffix))]}{suffix}"
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
+    with card("Global Analytics", "Hierarchical class-section analytics grouped by school"):
+        if not selected_session_id:
+            st.warning("Select a session to view analytics.")
+            return
+
+        exam_sessions_response = _safe_backend_call(
+            lambda: service_layer.get_exam_sessions(selected_session_id),
+            "Loading exam sessions...",
+        )
+        if not exam_sessions_response.get("success"):
+            show_form_result(exam_sessions_response)
+            return
+
+        exam_sessions = exam_sessions_response.get("data", {}).get("exam_sessions", [])
+        exam_session_map = build_option_map(exam_sessions, "exam_session_id", "month")
+        if not exam_session_map:
+            st.info("No exam sessions found for selected session.")
+            return
+
+        exam_labels = list(exam_session_map.keys())
+        selected_exam_label = st.selectbox(
+            "Exam Session",
+            exam_labels,
+            key="admin_hier_exam_session",
+            disabled=controls_disabled(),
+        )
+        selected_exam_session_id = get_select_value(exam_session_map, selected_exam_label)
+
+        class_options_response = _safe_backend_call(
+            lambda: service_layer.get_admin_class_hierarchical_analytics(
+                admin_id,
+                selected_session_id,
+                selected_exam_session_id,
+                "",
+            ),
+            "Loading classes...",
+        )
+        if not class_options_response.get("success"):
+            show_form_result(class_options_response)
+            return
+
+        class_names = class_options_response.get("data", {}).get("class_names", [])
+        if not class_names:
+            st.info("No classes available for selected exam session.")
+            return
+
+        selected_class_name = st.selectbox(
+            "Class",
+            class_names,
+            key="admin_hier_class_name",
+            disabled=controls_disabled(),
+        )
+
+        analytics_response = _safe_backend_call(
+            lambda: service_layer.get_admin_class_hierarchical_analytics(
+                admin_id,
+                selected_session_id,
+                selected_exam_session_id,
+                selected_class_name,
+            ),
+            "Loading hierarchical analytics...",
+        )
+        show_form_result(analytics_response)
+        if not analytics_response.get("success"):
+            return
+
+        payload = analytics_response.get("data", {})
+        summary = payload.get("summary", {})
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Students", int(summary.get("total_students", 0)))
+        with col2:
+            st.metric("Passed", int(summary.get("passed_students", 0)))
+        with col3:
+            st.metric("Failed", int(summary.get("failed_students", 0)))
+        with col4:
+            st.metric("Absent", int(summary.get("absent_students", 0)))
+
+        col5, col6, col7 = st.columns(3)
+        with col5:
+            st.metric("Appeared", int(summary.get("appeared_students", 0)))
+        with col6:
+            st.metric("Pass %", float(summary.get("pass_percentage", 0.0)))
+        with col7:
+            st.metric("Fail %", float(summary.get("fail_percentage", 0.0)))
+
+        grouped_rows = payload.get("grouped_rows", [])
+        if grouped_rows:
+            grouped_df = pd.DataFrame(grouped_rows)
+            ordered_columns = [
+                "School",
+                "Class",
+                "Section",
+                "Subject",
+                "Teacher",
+                "Total Students",
+                "Appeared",
+                "Absent",
+                "Passed",
+                "Failed",
+                "Pass %",
+                "Fail %",
+            ]
+            available_columns = [column for column in ordered_columns if column in grouped_df.columns]
+            grouped_df = grouped_df[available_columns] if available_columns else grouped_df
+            st.dataframe(grouped_df, use_container_width=True)
+        else:
+            st.info("No analytics rows found for selected filters.")
+
+        export_sheets = payload.get("export_sheets", {})
+        sections = payload.get("sections", [])
+        if not sections:
+            sections = sorted(export_sheets.keys())
+
+        if sections:
+            buffer = BytesIO()
+            used_sheet_names: set[str] = set()
+            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                for section in sections:
+                    section_rows = export_sheets.get(section, [])
+                    if section_rows:
+                        section_df = pd.DataFrame(section_rows)
+                    else:
+                        section_df = pd.DataFrame(
+                            [
+                                {
+                                    "School": "No data available",
+                                    "Subject": "No data available",
+                                    "Teacher": "-",
+                                    "Total": 0,
+                                    "Appeared": 0,
+                                    "Absent": 0,
+                                    "Passed": 0,
+                                    "Failed": 0,
+                                    "Pass %": 0.0,
+                                    "Fail %": 0.0,
+                                }
+                            ]
+                        )
+
+                    ordered_export_cols = [
+                        "School",
+                        "Subject",
+                        "Teacher",
+                        "Total",
+                        "Appeared",
+                        "Absent",
+                        "Passed",
+                        "Failed",
+                        "Pass %",
+                        "Fail %",
+                    ]
+                    export_columns = [col for col in ordered_export_cols if col in section_df.columns]
+                    section_df = section_df[export_columns] if export_columns else section_df
+
+                    sheet_name = _safe_excel_sheet_name(str(section), used_sheet_names)
+                    section_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            st.download_button(
+                label="Download Analytics Report",
+                data=buffer.getvalue(),
+                file_name="admin_class_analytics.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                disabled=controls_disabled(),
+            )
+
+
 def render_admin_page(selected_page: str, admin_id: str) -> None:
     ensure_page_config()
 
@@ -406,6 +593,9 @@ def render_admin_page(selected_page: str, admin_id: str) -> None:
         return
     if selected_page == "Principal Management":
         _render_principal_management(admin_id, selected_session_id)
+        return
+    if selected_page == "Global Analytics":
+        _render_global_analytics(admin_id, selected_session_id)
         return
 
     st.error("Access denied")

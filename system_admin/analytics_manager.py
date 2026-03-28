@@ -53,6 +53,7 @@ class SubjectsColumns:
 
 class TeachersColumns:
     TEACHER_ID = 0
+    TEACHER_NAME = 1
     SCHOOL_ID = 2
     SESSION_ID = 3
 
@@ -187,6 +188,7 @@ class AnalyticsManager:
             [
                 {
                     "teacher_id": self._safe_get(row, TeachersColumns.TEACHER_ID),
+                    "teacher_name": self._safe_get(row, TeachersColumns.TEACHER_NAME),
                     "school_id": self._safe_get(row, TeachersColumns.SCHOOL_ID),
                     "session_id": self._safe_get(row, TeachersColumns.SESSION_ID),
                 }
@@ -829,6 +831,362 @@ class AnalyticsManager:
             )
         except Exception as exc:
             return _response(False, f"Failed to fetch school analytics: {exc}")
+
+    def get_admin_hierarchical_class_analytics(
+        self,
+        session_id: str,
+        exam_session_id: str,
+        class_name: str = "",
+    ) -> Dict[str, Any]:
+        try:
+            normalized_session_id = session_id.strip()
+            normalized_exam_session_id = exam_session_id.strip()
+            normalized_class_name = class_name.strip()
+
+            if not normalized_session_id:
+                return _response(False, "session_id is required.")
+            if not normalized_exam_session_id:
+                return _response(False, "exam_session_id is required.")
+
+            schools_df, classes_df, subjects_df, teachers_df, assignments_df = self._read_master_data()
+            session_schools_df = schools_df[schools_df["session_id"] == normalized_session_id].copy()
+
+            if session_schools_df.empty:
+                return _response(
+                    True,
+                    "No schools found for selected session.",
+                    {
+                        "class_names": [],
+                        "summary": {
+                            "total_students": 0,
+                            "appeared_students": 0,
+                            "absent_students": 0,
+                            "passed_students": 0,
+                            "failed_students": 0,
+                            "pass_percentage": 0.0,
+                            "fail_percentage": 0.0,
+                        },
+                        "grouped_rows": [],
+                        "sections": [],
+                        "export_sheets": {},
+                    },
+                )
+
+            school_ids = set(session_schools_df["school_id"].astype(str).tolist())
+            session_classes_df = classes_df[classes_df["school_id"].isin(school_ids)].copy()
+            session_classes_df["class_name"] = session_classes_df["class_name"].astype(str).str.strip()
+            session_classes_df["class_section"] = session_classes_df["class_section"].astype(str).str.strip()
+            session_classes_df["class_label"] = session_classes_df.apply(
+                lambda row: self._class_label(row.get("class_name", ""), row.get("class_section", "")),
+                axis=1,
+            )
+
+            class_names = sorted(
+                {
+                    str(item).strip()
+                    for item in session_classes_df["class_name"].tolist()
+                    if str(item).strip()
+                }
+            )
+
+            if not normalized_class_name:
+                return _response(
+                    True,
+                    "Class names fetched successfully.",
+                    {
+                        "class_names": class_names,
+                        "summary": {
+                            "total_students": 0,
+                            "appeared_students": 0,
+                            "absent_students": 0,
+                            "passed_students": 0,
+                            "failed_students": 0,
+                            "pass_percentage": 0.0,
+                            "fail_percentage": 0.0,
+                        },
+                        "grouped_rows": [],
+                        "sections": [],
+                        "export_sheets": {},
+                    },
+                )
+
+            filtered_classes_df = session_classes_df[
+                session_classes_df["class_name"].astype(str).str.casefold() == normalized_class_name.casefold()
+            ].copy()
+
+            if filtered_classes_df.empty:
+                return _response(
+                    True,
+                    "No class sections found for selected class name.",
+                    {
+                        "class_names": class_names,
+                        "summary": {
+                            "total_students": 0,
+                            "appeared_students": 0,
+                            "absent_students": 0,
+                            "passed_students": 0,
+                            "failed_students": 0,
+                            "pass_percentage": 0.0,
+                            "fail_percentage": 0.0,
+                        },
+                        "grouped_rows": [],
+                        "sections": [],
+                        "export_sheets": {},
+                    },
+                )
+
+            filtered_class_ids = set(filtered_classes_df["class_id"].astype(str).tolist())
+            filtered_school_ids = set(filtered_classes_df["school_id"].astype(str).tolist())
+
+            subjects_scope_df = subjects_df[subjects_df["class_id"].isin(filtered_class_ids)].copy()
+            assignments_scope_df = assignments_df[
+                assignments_df["class_id"].isin(filtered_class_ids)
+                & assignments_df["school_id"].isin(filtered_school_ids)
+            ].copy()
+
+            teachers_scope_df = teachers_df[
+                (teachers_df["session_id"] == normalized_session_id)
+                & (teachers_df["school_id"].isin(filtered_school_ids))
+            ].copy()
+            teacher_name_by_id = {
+                str(row.get("teacher_id", "")): (
+                    str(row.get("teacher_name", "")).strip() or str(row.get("teacher_id", ""))
+                )
+                for _, row in teachers_scope_df.iterrows()
+            }
+
+            school_name_by_id = {
+                str(row.get("school_id", "")): str(row.get("school_name", ""))
+                for _, row in session_schools_df.iterrows()
+            }
+
+            school_cache: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]] = {}
+            for school_id in sorted(filtered_school_ids):
+                school_rows = session_schools_df[session_schools_df["school_id"] == school_id]
+                if school_rows.empty:
+                    school_cache[school_id] = (
+                        pd.DataFrame(columns=["student_id", "class_id"]),
+                        pd.DataFrame(columns=["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]),
+                    )
+                    continue
+                school_row = school_rows.iloc[0]
+                school_sheet_id = self.controller.get_school_sheet_id_from_url(str(school_row.get("school_sheet_url", "")))
+                if not school_sheet_id:
+                    school_cache[school_id] = (
+                        pd.DataFrame(columns=["student_id", "class_id"]),
+                        pd.DataFrame(columns=["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]),
+                    )
+                    continue
+
+                students_df = self._read_school_students(school_sheet_id)
+                results_df = self._read_school_results(school_sheet_id)
+                school_cache[school_id] = (students_df, results_df)
+
+            grouped_rows: List[Dict[str, Any]] = []
+            export_sheets: Dict[str, List[Dict[str, Any]]] = {}
+
+            summary_total_students = 0
+            summary_appeared_students = 0
+            summary_absent_students = 0
+            summary_passed_students = 0
+            summary_failed_students = 0
+
+            sorted_classes_df = filtered_classes_df.sort_values(
+                by=["class_name", "class_section", "school_id"],
+                ignore_index=True,
+            )
+
+            for _, class_row in sorted_classes_df.iterrows():
+                school_id = str(class_row.get("school_id", ""))
+                class_id = str(class_row.get("class_id", ""))
+                class_name_value = str(class_row.get("class_name", "")).strip()
+                class_section_value = str(class_row.get("class_section", "")).strip()
+                class_label_value = str(class_row.get("class_label", "")).strip() or self._class_label(
+                    class_name_value,
+                    class_section_value,
+                )
+                school_name = school_name_by_id.get(school_id, "")
+
+                students_df, results_df = school_cache.get(
+                    school_id,
+                    (
+                        pd.DataFrame(columns=["student_id", "class_id"]),
+                        pd.DataFrame(columns=["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]),
+                    ),
+                )
+                class_students_df = students_df[students_df["class_id"] == class_id].copy()
+
+                class_performance_df = self._student_performance_frame(
+                    students_df,
+                    results_df,
+                    normalized_exam_session_id,
+                    class_id=class_id,
+                    subject_id="",
+                )
+                class_metrics = self._metrics_from_performance(class_performance_df)
+
+                summary_total_students += int(class_metrics.get("total_students", 0))
+                summary_appeared_students += int(class_metrics.get("appeared_students", 0))
+                summary_absent_students += int(class_metrics.get("absent_students", 0))
+                summary_passed_students += int(class_metrics.get("passed_students", 0))
+                summary_failed_students += int(class_metrics.get("failed_students", 0))
+
+                if class_label_value not in export_sheets:
+                    export_sheets[class_label_value] = []
+
+                class_results_scope = results_df[
+                    (results_df["exam_session_id"] == normalized_exam_session_id)
+                    & (results_df["class_id"] == class_id)
+                ].copy()
+
+                if class_results_scope.empty:
+                    no_data_row = {
+                        "School": school_name,
+                        "Subject": "No data available",
+                        "Teacher": "-",
+                        "Total": int(class_metrics.get("total_students", 0)),
+                        "Appeared": 0,
+                        "Absent": int(class_metrics.get("total_students", 0)),
+                        "Passed": 0,
+                        "Failed": 0,
+                        "Pass %": 0.0,
+                        "Fail %": 0.0,
+                    }
+                    export_sheets[class_label_value].append(no_data_row)
+                    grouped_rows.append(
+                        {
+                            "School": school_name,
+                            "Class": class_name_value,
+                            "Section": class_section_value,
+                            "Subject": "No data available",
+                            "Teacher": "-",
+                            "Total Students": int(class_metrics.get("total_students", 0)),
+                            "Appeared": 0,
+                            "Absent": int(class_metrics.get("total_students", 0)),
+                            "Passed": 0,
+                            "Failed": 0,
+                            "Pass %": 0.0,
+                            "Fail %": 0.0,
+                        }
+                    )
+                    continue
+
+                class_subjects_df = subjects_scope_df[subjects_scope_df["class_id"] == class_id].copy()
+                if class_subjects_df.empty:
+                    class_subjects_df = pd.DataFrame([{"subject_id": "", "subject_name": "Unassigned"}])
+
+                for _, subject_row in class_subjects_df.iterrows():
+                    subject_id = str(subject_row.get("subject_id", "")).strip()
+                    subject_name = str(subject_row.get("subject_name", "")).strip() or "Unassigned"
+
+                    subject_performance_df = self._student_performance_frame(
+                        students_df,
+                        results_df,
+                        normalized_exam_session_id,
+                        class_id=class_id,
+                        subject_id=subject_id,
+                    )
+                    subject_metrics = self._metrics_from_performance(subject_performance_df)
+
+                    subject_assignments_df = assignments_scope_df[
+                        (assignments_scope_df["school_id"] == school_id)
+                        & (assignments_scope_df["class_id"] == class_id)
+                        & (assignments_scope_df["subject_id"] == subject_id)
+                    ].copy()
+
+                    teacher_names: List[str] = []
+                    if subject_assignments_df.empty:
+                        teacher_names = ["Unassigned"]
+                    else:
+                        for teacher_id_value in subject_assignments_df["teacher_id"].astype(str).tolist():
+                            teacher_names.append(teacher_name_by_id.get(teacher_id_value, teacher_id_value))
+                        if not teacher_names:
+                            teacher_names = ["Unassigned"]
+
+                    for teacher_name in teacher_names:
+                        total_students = int(subject_metrics.get("total_students", len(class_students_df)))
+                        appeared_students = int(subject_metrics.get("appeared_students", 0))
+                        absent_students = int(subject_metrics.get("absent_students", max(total_students - appeared_students, 0)))
+                        passed_students = int(subject_metrics.get("passed_students", 0))
+                        failed_students = int(subject_metrics.get("failed_students", 0))
+                        pass_percentage = float(subject_metrics.get("pass_percentage", 0.0))
+                        fail_percentage = float(subject_metrics.get("fail_percentage", 0.0))
+
+                        grouped_rows.append(
+                            {
+                                "School": school_name,
+                                "Class": class_name_value,
+                                "Section": class_section_value,
+                                "Subject": subject_name,
+                                "Teacher": teacher_name,
+                                "Total Students": total_students,
+                                "Appeared": appeared_students,
+                                "Absent": absent_students,
+                                "Passed": passed_students,
+                                "Failed": failed_students,
+                                "Pass %": round(pass_percentage, 2),
+                                "Fail %": round(fail_percentage, 2),
+                            }
+                        )
+                        export_sheets[class_label_value].append(
+                            {
+                                "School": school_name,
+                                "Subject": subject_name,
+                                "Teacher": teacher_name,
+                                "Total": total_students,
+                                "Appeared": appeared_students,
+                                "Absent": absent_students,
+                                "Passed": passed_students,
+                                "Failed": failed_students,
+                                "Pass %": round(pass_percentage, 2),
+                                "Fail %": round(fail_percentage, 2),
+                            }
+                        )
+
+            summary_denominator = summary_appeared_students if summary_appeared_students > 0 else 0
+            summary_pass_percentage = (
+                round((summary_passed_students / summary_denominator) * 100, 2)
+                if summary_denominator
+                else 0.0
+            )
+            summary_fail_percentage = (
+                round((summary_failed_students / summary_denominator) * 100, 2)
+                if summary_denominator
+                else 0.0
+            )
+
+            grouped_df = pd.DataFrame(grouped_rows)
+            if not grouped_df.empty:
+                grouped_df = grouped_df.sort_values(
+                    by=["School", "Class", "Section", "Subject", "Teacher"],
+                    ignore_index=True,
+                )
+                grouped_rows = grouped_df.to_dict("records")
+
+            sections = sorted(export_sheets.keys())
+
+            return _response(
+                True,
+                "Admin hierarchical analytics fetched successfully.",
+                {
+                    "class_names": class_names,
+                    "selected_class": normalized_class_name,
+                    "summary": {
+                        "total_students": summary_total_students,
+                        "appeared_students": summary_appeared_students,
+                        "absent_students": summary_absent_students,
+                        "passed_students": summary_passed_students,
+                        "failed_students": summary_failed_students,
+                        "pass_percentage": summary_pass_percentage,
+                        "fail_percentage": summary_fail_percentage,
+                    },
+                    "grouped_rows": grouped_rows,
+                    "sections": sections,
+                    "export_sheets": export_sheets,
+                },
+            )
+        except Exception as exc:
+            return _response(False, f"Failed to fetch admin hierarchical analytics: {exc}")
 
     def get_session_analytics(
         self,

@@ -41,11 +41,8 @@ def _route_authenticated_user() -> None:
         return
 
     if role in {"admin", "super_user", "superuser"}:
-        if selected_page in {"School Management", "Session Management", "Principal Management"}:
+        if selected_page in {"School Management", "Session Management", "Principal Management", "Global Analytics"}:
             admin_dashboard.render_admin_page(selected_page, user_id)
-            return
-        if selected_page == "Global Analytics":
-            analytics_page.render_admin_analytics(user_id)
             return
         if selected_page == "Profile Settings":
             profile_settings.render_profile_settings(user_id, username)
