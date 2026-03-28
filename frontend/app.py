@@ -15,6 +15,67 @@ from frontend.pages import admin_dashboard, analytics_page, login_page, principa
 from frontend.ui_theme import apply_theme, init_ui_state
 
 
+def _normalize_page(value: str) -> str:
+    return " ".join(str(value).strip().casefold().split())
+
+
+def _route_for_admin(selected_page: str, user_id: str, username: str) -> None:
+    normalized_page = _normalize_page(selected_page)
+    if normalized_page in {
+        "school management",
+        "session management",
+        "principal management",
+        "global analytics",
+        "analytics",
+    }:
+        admin_dashboard.render_admin_page(selected_page, user_id)
+        return
+    if normalized_page == "profile settings":
+        profile_settings.render_profile_settings(user_id, username)
+        return
+
+    st.session_state["nav_page"] = "School Management"
+    st.warning("Invalid page selection detected. Redirecting to School Management.")
+    st.rerun()
+
+
+def _route_for_principal(selected_page: str, user_id: str, username: str) -> None:
+    normalized_page = _normalize_page(selected_page)
+    if normalized_page in {
+        "class management",
+        "subject management",
+        "teacher management",
+        "assignments",
+        "class incharge",
+    }:
+        principal_dashboard.render_principal_page(selected_page, user_id)
+        return
+    if normalized_page in {"school analytics", "analytics"}:
+        analytics_page.render_principal_analytics(user_id)
+        return
+    if normalized_page == "profile settings":
+        profile_settings.render_profile_settings(user_id, username)
+        return
+
+    st.session_state["nav_page"] = "Class Management"
+    st.warning("Invalid page selection detected. Redirecting to Class Management.")
+    st.rerun()
+
+
+def _route_for_teacher(selected_page: str, user_id: str, username: str) -> None:
+    normalized_page = _normalize_page(selected_page)
+    if normalized_page in {"student enrollment", "results entry", "school analytics", "analytics"}:
+        teacher_dashboard.render_teacher_page(selected_page, user_id)
+        return
+    if normalized_page == "profile settings":
+        profile_settings.render_profile_settings(user_id, username)
+        return
+
+    st.session_state["nav_page"] = "Student Enrollment"
+    st.warning("Invalid page selection detected. Redirecting to Student Enrollment.")
+    st.rerun()
+
+
 def _init_session_state() -> None:
     defaults = {
         "is_logged_in": False,
@@ -40,51 +101,16 @@ def _route_authenticated_user() -> None:
         st.error("Access denied")
         return
 
-    normalized_page = str(selected_page).strip().casefold()
-
     if role in {"admin", "super_user", "superuser"}:
-        if normalized_page in {
-            "school management",
-            "session management",
-            "principal management",
-            "global analytics",
-            "analytics",
-        }:
-            admin_dashboard.render_admin_page(selected_page, user_id)
-            return
-        if normalized_page == "profile settings":
-            profile_settings.render_profile_settings(user_id, username)
-            return
-        st.error("Access denied")
+        _route_for_admin(selected_page, user_id, username)
         return
 
     if role == "principal":
-        if normalized_page in {
-            "class management",
-            "subject management",
-            "teacher management",
-            "assignments",
-            "class incharge",
-        }:
-            principal_dashboard.render_principal_page(selected_page, user_id)
-            return
-        if normalized_page == "school analytics":
-            analytics_page.render_principal_analytics(user_id)
-            return
-        if normalized_page == "profile settings":
-            profile_settings.render_profile_settings(user_id, username)
-            return
-        st.error("Access denied")
+        _route_for_principal(selected_page, user_id, username)
         return
 
     if role == "teacher":
-        if normalized_page in {"student enrollment", "results entry", "school analytics"}:
-            teacher_dashboard.render_teacher_page(selected_page, user_id)
-            return
-        if normalized_page == "profile settings":
-            profile_settings.render_profile_settings(user_id, username)
-            return
-        st.error("Access denied")
+        _route_for_teacher(selected_page, user_id, username)
         return
 
     st.error("Access denied")

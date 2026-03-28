@@ -46,6 +46,11 @@ def render_sidebar(role: str, username: str) -> Optional[str]:
             st.error("Access denied")
         return None
 
+    role_key = str(role).strip().lower()
+    if st.session_state.get("nav_role") != role_key:
+        st.session_state["nav_role"] = role_key
+        st.session_state["nav_page"] = available_pages[0]
+
     if "nav_page" not in st.session_state or st.session_state.get("nav_page") not in available_pages:
         st.session_state["nav_page"] = available_pages[0]
 
