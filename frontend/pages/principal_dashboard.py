@@ -6,7 +6,7 @@ import streamlit as st
 
 from frontend.components.forms import build_option_map, form_heading, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload, show_simple_kv_table
-from frontend.ui_theme import card, controls_disabled, render_page_header, show_loading
+from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
 from system_admin import service_layer
 from system_admin.google_sheets_utils import safe_sheet_read
 
@@ -78,11 +78,11 @@ def _selected_school(principal_id: str) -> Optional[Dict[str, Any]]:
                 default_index = index
                 break
 
-    selected_label = st.selectbox(
+    selected_label = pill_select(
         "School Context",
         labels,
-        index=default_index,
         key="principal_selected_school_label",
+        default_index=default_index,
         disabled=_loading(),
     )
     resolved_school_id = get_select_value(school_map, selected_label)
@@ -162,7 +162,12 @@ def _render_class_management(principal_id: str, school_id: str) -> None:
     class_map = build_option_map(classes, "class_id", "class_name")
     if class_map:
         with st.form("delete_class_form"):
-            selected_class = st.selectbox("Class", list(class_map.keys()), disabled=_loading())
+            selected_class = pill_select(
+                "Class",
+                list(class_map.keys()),
+                key="principal_delete_class",
+                disabled=_loading(),
+            )
             submitted = st.form_submit_button("Delete Class", disabled=_loading())
         if submitted:
             class_id = get_select_value(class_map, selected_class)
@@ -231,7 +236,12 @@ def _render_subject_management(principal_id: str, school_id: str) -> None:
         return
 
     with st.form("create_subject_form"):
-        selected_class = st.selectbox("Class", list(class_map.keys()), disabled=_loading())
+        selected_class = pill_select(
+            "Class",
+            list(class_map.keys()),
+            key="principal_create_subject_class",
+            disabled=_loading(),
+        )
         subject_name = st.text_input("Subject name", disabled=_loading())
         submitted = st.form_submit_button("Create Subject", disabled=_loading())
     if submitted:
@@ -260,7 +270,7 @@ def _render_assignments(principal_id: str, school_id: str) -> None:
     teacher_map = build_option_map(teachers, "teacher_id", "username")
 
     if class_map and teacher_map:
-        selected_class_label = st.selectbox(
+        selected_class_label = pill_select(
             "Class",
             list(class_map.keys()),
             key="principal_assign_class",
@@ -273,7 +283,12 @@ def _render_assignments(principal_id: str, school_id: str) -> None:
         if subject_map:
             with st.form("assign_teacher_form"):
                 selected_teacher = st.selectbox("Teacher", list(teacher_map.keys()), disabled=_loading())
-                selected_subject = st.selectbox("Subject", list(subject_map.keys()), disabled=_loading())
+                selected_subject = pill_select(
+                    "Subject",
+                    list(subject_map.keys()),
+                    key="principal_assign_subject",
+                    disabled=_loading(),
+                )
                 submitted = st.form_submit_button("Assign Teacher", disabled=_loading())
             if submitted:
                 teacher_id = get_select_value(teacher_map, selected_teacher)
@@ -292,7 +307,37 @@ def _render_assignments(principal_id: str, school_id: str) -> None:
         st.info("Assignment requires teachers, classes, and subjects in this school.")
 
     assignments = _assignments(school_id)
-    assignment_map = build_option_map(assignments, "assignment_id", "assignment_id")
+
+    class_name_by_id = {
+        str(item.get("class_id", "")): str(item.get("class_name", "")).strip()
+        for item in classes
+    }
+    teacher_name_by_id = {
+        str(item.get("teacher_id", "")): str(item.get("username", "")).strip()
+        for item in teachers
+    }
+    subject_name_by_id = {
+        str(item.get("subject_id", "")): str(item.get("subject_name", "")).strip()
+        for item in subjects
+    }
+
+    display_assignments: List[Dict[str, Any]] = []
+    for item in assignments:
+        assignment_id = str(item.get("assignment_id", "")).strip()
+        teacher_name = teacher_name_by_id.get(str(item.get("teacher_id", "")).strip(), "Teacher")
+        class_name = class_name_by_id.get(str(item.get("class_id", "")).strip(), "Class")
+        subject_name = subject_name_by_id.get(str(item.get("subject_id", "")).strip(), "Subject")
+        display_assignments.append(
+            {
+                "assignment_id": assignment_id,
+                "label": f"{teacher_name} -> {class_name} / {subject_name}",
+                "teacher": teacher_name,
+                "class": class_name,
+                "subject": subject_name,
+            }
+        )
+
+    assignment_map = build_option_map(display_assignments, "assignment_id", "label")
     if assignment_map:
         with st.form("deassign_teacher_form"):
             selected_assignment = st.selectbox("Assignment", list(assignment_map.keys()), disabled=_loading())
@@ -310,7 +355,7 @@ def _render_assignments(principal_id: str, school_id: str) -> None:
     else:
         st.info("No assignments available.")
 
-    show_records("Assignments", assignments)
+    show_records("Assignments", display_assignments)
 
 
 def _render_class_incharge_management(principal_id: str, school_id: str) -> None:
@@ -323,7 +368,12 @@ def _render_class_incharge_management(principal_id: str, school_id: str) -> None
 
     if class_map and teacher_map:
         with st.form("assign_class_incharge_form"):
-            selected_class = st.selectbox("Class", list(class_map.keys()), disabled=_loading())
+            selected_class = pill_select(
+                "Class",
+                list(class_map.keys()),
+                key="principal_incharge_class",
+                disabled=_loading(),
+            )
             selected_teacher = st.selectbox("Teacher", list(teacher_map.keys()), disabled=_loading())
             submitted = st.form_submit_button("Assign Incharge", disabled=_loading())
         if submitted:
@@ -342,7 +392,12 @@ def _render_class_incharge_management(principal_id: str, school_id: str) -> None
 
     if class_map:
         with st.form("deassign_class_incharge_form"):
-            selected_class = st.selectbox("Class to clear incharge", list(class_map.keys()), disabled=_loading())
+            selected_class = pill_select(
+                "Class to clear incharge",
+                list(class_map.keys()),
+                key="principal_clear_incharge_class",
+                disabled=_loading(),
+            )
             submitted = st.form_submit_button("Remove Incharge", disabled=_loading())
         if submitted:
             class_id = get_select_value(class_map, selected_class)
@@ -359,6 +414,7 @@ def _render_class_incharge_management(principal_id: str, school_id: str) -> None
 
 
 def render_principal_page(selected_page: str, principal_id: str) -> None:
+    ensure_page_config()
     _init_ui_state()
 
     if _loading():
@@ -373,12 +429,12 @@ def render_principal_page(selected_page: str, principal_id: str) -> None:
         return
 
     with card("School Context", "Selected school applies to all actions below"):
+        session_label = str(school.get("session_name", "")).strip() or "Active Session"
         show_simple_kv_table(
             "School Context",
             {
-                "school_id": school.get("school_id", ""),
-                "school_name": school.get("school_name", ""),
-                "session_id": school.get("session_id", ""),
+                "school": school.get("school_name", ""),
+                "session": session_label,
             },
         )
 

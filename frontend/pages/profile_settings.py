@@ -6,7 +6,7 @@ import streamlit as st
 
 from frontend.components.forms import show_form_result
 from frontend.components.tables import show_response_payload
-from frontend.ui_theme import card, controls_disabled, render_page_header, show_loading
+from frontend.ui_theme import card, controls_disabled, ensure_page_config, render_page_header, show_loading
 from system_admin import service_layer
 from system_admin.google_sheets_utils import safe_sheet_read
 
@@ -29,6 +29,8 @@ def _safe_backend_call(api_func: Callable[[], Dict[str, Any]], spinner_text: str
 
 
 def render_profile_settings(user_id: str, current_username: str) -> None:
+    ensure_page_config()
+
     if controls_disabled():
         st.warning("Please wait, loading data...")
         st.stop()
@@ -40,7 +42,11 @@ def render_profile_settings(user_id: str, current_username: str) -> None:
         with col1:
             st.markdown("### 👤")
         with col2:
-            st.markdown(f"**Current username:** {current_username}")
+            role_label = str(st.session_state.get("role", "")).strip().title() or "User"
+            full_name = current_username
+            st.markdown(f"**Username:** {current_username}")
+            st.markdown(f"**Full Name:** {full_name}")
+            st.markdown(f"**Role:** {role_label}")
             st.caption("Keep your credentials secure and unique.")
 
     with card("Update Credentials", "Change username and password in a single secure action"):

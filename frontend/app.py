@@ -80,7 +80,11 @@ def _route_authenticated_user() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="School Management", layout="wide")
+    st.set_page_config(
+        layout="wide",
+        page_title="School Management System",
+        page_icon="🎓",
+    )
     _init_session_state()
     apply_theme()
 

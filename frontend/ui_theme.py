@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
 import altair as alt
 import streamlit as st
@@ -10,61 +10,107 @@ import streamlit as st
 _PLOTLY_IO: Any = None
 
 LIGHT_THEME: Dict[str, str] = {
-    "primaryColor": "#B77942",
-    "backgroundColor": "#F6EFE3",
-    "secondaryBackgroundColor": "#EADBC4",
-    "cardColor": "#FFF9EF",
-    "textColor": "#3E2F22",
-    "mutedText": "#7F6A54",
-    "cardBorder": "#D8C3A8",
-    "sidebarBg": "#E7D5BC",
-    "sidebarText": "#3E2F22",
-    "buttonBg": "#B77942",
-    "buttonText": "#FFFFFF",
-    "buttonDisabledBg": "#D9C0A6",
-    "buttonDisabledText": "#6C5A47",
-    "sidebarActiveBg": "#D4BA98",
-    "sidebarActiveText": "#3A2511",
+    "primaryColor": "#b77942",
+    "backgroundColor": "#f7f3eb",
+    "secondaryBackgroundColor": "#efe5d5",
+    "cardColor": "#fffaf2",
+    "textColor": "#2f241a",
+    "mutedText": "#6e5a46",
+    "cardBorder": "#d8c3a8",
+    "sidebarBg": "#efe5d5",
+    "sidebarText": "#2f241a",
+    "buttonBg": "#b77942",
+    "buttonText": "#fffaf2",
+    "buttonDisabledBg": "#ddccb6",
+    "buttonDisabledText": "#6e5a46",
+    "sidebarActiveBg": "#dfc5a8",
+    "sidebarActiveText": "#2f241a",
     "sidebarInactiveBg": "transparent",
-    "chartGrid": "#CEB899",
-    "chartPrimary": "#B77942",
+    "chartGrid": "#d8c3a8",
+    "chartPrimary": "#b77942",
 }
 
 DARK_THEME: Dict[str, str] = {
-    "primaryColor": "#6366F1",
-    "backgroundColor": "#0F172A",
-    "secondaryBackgroundColor": "#111827",
-    "cardColor": "#1E293B",
-    "textColor": "#E5E7EB",
-    "mutedText": "#94A3B8",
-    "cardBorder": "#374151",
-    "sidebarBg": "#111827",
-    "sidebarText": "#E5E7EB",
-    "buttonBg": "#6366F1",
-    "buttonText": "#FFFFFF",
-    "buttonDisabledBg": "#374151",
-    "buttonDisabledText": "#9CA3AF",
-    "sidebarActiveBg": "#1E293B",
-    "sidebarActiveText": "#A5B4FC",
+    "primaryColor": "#615fff",
+    "backgroundColor": "#1d293d",
+    "secondaryBackgroundColor": "#0f172b",
+    "cardColor": "#162238",
+    "textColor": "#e2e8f0",
+    "mutedText": "#a7b4c9",
+    "cardBorder": "#2b3a56",
+    "sidebarBg": "#0f172b",
+    "sidebarText": "#e2e8f0",
+    "buttonBg": "#615fff",
+    "buttonText": "#e2e8f0",
+    "buttonDisabledBg": "#2b3a56",
+    "buttonDisabledText": "#8ea1be",
+    "sidebarActiveBg": "#1f2c46",
+    "sidebarActiveText": "#e2e8f0",
     "sidebarInactiveBg": "transparent",
-    "chartGrid": "#334155",
-    "chartPrimary": "#93C5FD",
+    "chartGrid": "#2b3a56",
+    "chartPrimary": "#8a87ff",
 }
+
+
+def ensure_page_config() -> None:
+    try:
+        st.set_page_config(
+            layout="wide",
+            page_title="School Management System",
+            page_icon="🎓",
+        )
+    except Exception:
+        # Streamlit allows set_page_config only once per app run.
+        pass
 
 
 def init_ui_state() -> None:
     if "theme" not in st.session_state:
-        st.session_state["theme"] = "light"
+        st.session_state["theme"] = "dark"
     if "is_loading" not in st.session_state:
         st.session_state["is_loading"] = False
 
 
 def current_theme_name() -> str:
-    return str(st.session_state.get("theme", "light")).strip().lower() or "light"
+    return str(st.session_state.get("theme", "dark")).strip().lower() or "dark"
 
 
 def current_theme_tokens() -> Dict[str, str]:
     return DARK_THEME if current_theme_name() == "dark" else LIGHT_THEME
+
+
+def pill_select(
+    label: str,
+    options: List[str],
+    key: str,
+    default_index: int = 0,
+    disabled: bool = False,
+) -> str:
+    if not options:
+        return ""
+
+    safe_default_index = max(0, min(default_index, len(options) - 1))
+    default_option = options[safe_default_index]
+
+    if hasattr(st, "pills"):
+        selected = st.pills(
+            label,
+            options=options,
+            default=default_option,
+            key=key,
+            disabled=disabled,
+        )
+        return str(selected)
+
+    return str(
+        st.selectbox(
+            label,
+            options,
+            index=safe_default_index,
+            key=key,
+            disabled=disabled,
+        )
+    )
 
 
 def _altair_theme_config() -> Dict[str, Any]:
@@ -86,16 +132,6 @@ def _altair_theme_config() -> Dict[str, Any]:
             },
             "view": {
                 "stroke": tokens["cardBorder"],
-            },
-            "range": {
-                "category": [
-                    tokens["chartPrimary"],
-                    "#10B981",
-                    "#F59E0B",
-                    "#EF4444",
-                    "#06B6D4",
-                    "#8B5CF6",
-                ]
             },
         }
     }
@@ -127,6 +163,8 @@ def apply_theme() -> None:
 
     css = f"""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
     :root {{
         --sms-primary: {tokens['primaryColor']};
         --sms-button-bg: {tokens['buttonBg']};
@@ -146,23 +184,23 @@ def apply_theme() -> None:
         --sms-sidebar-text: {tokens['sidebarText']};
     }}
 
+    html, body, [class*="css"], .stApp {{
+        font-family: 'Space Grotesk', sans-serif !important;
+    }}
+
     body {{
         color: var(--sms-text) !important;
         background-color: var(--sms-bg) !important;
     }}
 
-    .stApp {{
-        background: var(--sms-bg);
+    .stApp, [data-testid="stAppViewContainer"] > .main {{
+        background: var(--sms-bg) !important;
         color: var(--sms-text) !important;
     }}
 
     header[data-testid="stHeader"] {{
         background: var(--sms-surface) !important;
         border-bottom: 1px solid var(--sms-border) !important;
-    }}
-
-    [data-testid="stDecoration"] {{
-        background: var(--sms-primary) !important;
     }}
 
     [data-testid="stToolbar"] button,
@@ -173,32 +211,28 @@ def apply_theme() -> None:
         fill: var(--sms-text) !important;
     }}
 
-    [data-testid="stToolbar"] {{
-        background: transparent !important;
+    [data-testid="stSidebar"],
+    section[data-testid="stSidebar"] {{
+        background: var(--sms-sidebar) !important;
+        border-right: 1px solid var(--sms-border) !important;
+        color: var(--sms-sidebar-text) !important;
     }}
 
-    [data-testid="stAppViewContainer"] > .main {{
-        background: var(--sms-bg) !important;
+    section[data-testid="stSidebar"] * {{
+        color: var(--sms-sidebar-text) !important;
     }}
 
     .stMarkdown, .stText, .stCaption, .stAlert, p, span, label, h1, h2, h3, h4, h5, h6 {{
         color: inherit !important;
     }}
 
-    div[data-testid="stMarkdownContainer"] p,
-    div[data-testid="stMarkdownContainer"] li,
-    div[data-testid="stMarkdownContainer"] strong,
-    div[data-testid="stMetricLabel"] div,
-    div[data-testid="stMetricValue"] div {{
-        color: var(--sms-text) !important;
-    }}
-
+    div[data-testid="stVerticalBlockBorderWrapper"],
     div[data-testid="stDataFrame"],
     div[data-testid="stTable"] {{
         background: var(--sms-card) !important;
         border: 1px solid var(--sms-border) !important;
-        border-radius: 12px !important;
-        overflow: hidden !important;
+        border-radius: 14px !important;
+        color: var(--sms-text) !important;
     }}
 
     div[data-testid="stDataFrame"] {{
@@ -219,53 +253,38 @@ def apply_theme() -> None:
         border-color: var(--sms-border) !important;
     }}
 
-    div[data-testid="stDataFrame"] canvas,
-    div[data-testid="stDataFrame"] [role="grid"] {{
+    div[data-testid="stTable"] table,
+    div[data-testid="stTable"] th,
+    div[data-testid="stTable"] td {{
         background: var(--sms-card) !important;
+        color: var(--sms-text) !important;
+        border-color: var(--sms-border) !important;
     }}
 
-    div[data-testid="stDataFrame"] [role="columnheader"],
-    div[data-testid="stDataFrame"] [role="gridcell"],
-    div[data-testid="stDataFrame"] [class*="header"],
-    div[data-testid="stDataFrame"] [class*="cell"] {{
-        background: var(--sms-card) !important;
-    }}
-
-    div[data-testid="stDataFrame"] [class*="header"],
-    div[data-testid="stDataFrame"] [role="columnheader"] {{
+    div[data-testid="stTable"] th {{
         background: var(--sms-surface) !important;
-        color: var(--sms-text) !important;
-    }}
-
-    div[data-testid="stDataFrame"] [class*="row"]:hover [class*="cell"],
-    div[data-testid="stDataFrame"] [role="row"]:hover [role="gridcell"] {{
-        background: color-mix(in srgb, var(--sms-primary) 12%, var(--sms-card)) !important;
-    }}
-
-    div[data-testid="stSelectbox"] label,
-    div[data-testid="stMultiSelect"] label,
-    div[data-testid="stTextInput"] label,
-    div[data-testid="stNumberInput"] label,
-    div[data-testid="stDateInput"] label,
-    div[data-testid="stTextArea"] label,
-    div[data-testid="stFileUploader"] label,
-    div[data-testid="stRadio"] label,
-    div[data-testid="stCheckbox"] label {{
-        color: var(--sms-text) !important;
     }}
 
     div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
-    div[data-testid="stMultiSelect"] [data-baseweb="select"] > div {{
+    div[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stDateInput"] input,
+    div[data-testid="stTextArea"] textarea {{
         background: var(--sms-card) !important;
-        border: 1px solid var(--sms-border) !important;
         color: var(--sms-text) !important;
+        border: 1px solid var(--sms-border) !important;
         border-radius: 10px !important;
     }}
 
     div[data-testid="stSelectbox"] [data-baseweb="select"] *,
-    div[data-testid="stMultiSelect"] [data-baseweb="select"] * {{
-        color: var(--sms-text) !important;
-        fill: var(--sms-text) !important;
+    div[data-testid="stMultiSelect"] [data-baseweb="select"] *,
+    div[data-testid="stTextInput"] input::placeholder,
+    div[data-testid="stNumberInput"] input::placeholder,
+    div[data-testid="stDateInput"] input::placeholder,
+    div[data-testid="stTextArea"] textarea::placeholder {{
+        color: var(--sms-muted) !important;
+        fill: var(--sms-muted) !important;
     }}
 
     [data-baseweb="popover"],
@@ -281,83 +300,9 @@ def apply_theme() -> None:
         background: var(--sms-card) !important;
     }}
 
-    div[role="option"]:hover,
-    div[role="option"][aria-selected="true"] {{
+    div[role="option"][aria-selected="true"],
+    div[role="option"]:hover {{
         background: color-mix(in srgb, var(--sms-primary) 14%, var(--sms-card)) !important;
-    }}
-
-    div[data-testid="stTextInput"] input,
-    div[data-testid="stNumberInput"] input,
-    div[data-testid="stDateInput"] input,
-    div[data-testid="stTextArea"] textarea {{
-        background: var(--sms-card) !important;
-        color: var(--sms-text) !important;
-        border: 1px solid var(--sms-border) !important;
-        border-radius: 10px !important;
-    }}
-
-    div[data-testid="stTextInput"] input::placeholder,
-    div[data-testid="stNumberInput"] input::placeholder,
-    div[data-testid="stDateInput"] input::placeholder,
-    div[data-testid="stTextArea"] textarea::placeholder {{
-        color: var(--sms-muted) !important;
-    }}
-
-    div[data-testid="stRadio"] [role="radiogroup"],
-    div[data-testid="stCheckbox"] [data-testid="stMarkdownContainer"] {{
-        color: var(--sms-text) !important;
-    }}
-
-    div[data-testid="stTable"] table {{
-        width: 100%;
-        border-collapse: collapse;
-        background: var(--sms-card) !important;
-        color: var(--sms-text) !important;
-    }}
-
-    div[data-testid="stTable"] th,
-    div[data-testid="stTable"] td {{
-        border: 1px solid var(--sms-border) !important;
-        color: var(--sms-text) !important;
-        background: var(--sms-card) !important;
-    }}
-
-    div[data-testid="stTable"] th {{
-        background: var(--sms-surface) !important;
-    }}
-
-    section[data-testid="stSidebar"] {{
-        background: var(--sms-sidebar) !important;
-        border-right: 1px solid var(--sms-border);
-        color: var(--sms-sidebar-text) !important;
-    }}
-
-    section[data-testid="stSidebar"] .block-container {{
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }}
-
-    section[data-testid="stSidebar"] * {{
-        color: var(--sms-sidebar-text) !important;
-    }}
-
-    [data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"] {{
-        background: var(--sms-sidebar-active-bg) !important;
-        color: var(--sms-sidebar-active-text) !important;
-        border: 1px solid var(--sms-border) !important;
-    }}
-
-    [data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"] {{
-        background: var(--sms-sidebar-inactive-bg) !important;
-        color: var(--sms-sidebar-text) !important;
-        border: 1px solid var(--sms-border) !important;
-    }}
-
-    div[data-testid="stVerticalBlockBorderWrapper"] {{
-        border: 1px solid var(--sms-border) !important;
-        border-radius: 14px !important;
-        background: var(--sms-card) !important;
-        color: var(--sms-text) !important;
     }}
 
     div[data-testid="stButton"] > button,
@@ -365,10 +310,17 @@ def apply_theme() -> None:
     div[data-testid="stFormSubmitButton"] > button {{
         width: 100%;
         border-radius: 10px;
-        transition: all 0.18s ease;
         border: 1px solid var(--sms-border);
-        background: var(--sms-button-bg);
-        color: var(--sms-button-text);
+        background: var(--sms-button-bg) !important;
+        color: var(--sms-button-text) !important;
+        transition: all 0.15s ease;
+    }}
+
+    div[data-testid="stButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover {{
+        border-color: var(--sms-primary) !important;
+        box-shadow: 0 8px 20px color-mix(in srgb, var(--sms-primary) 28%, transparent);
     }}
 
     div[data-testid="stButton"] > button:disabled,
@@ -380,34 +332,29 @@ def apply_theme() -> None:
         opacity: 1 !important;
     }}
 
-    div[data-testid="stButton"] > button:hover,
-    div[data-testid="stDownloadButton"] > button:hover,
-    div[data-testid="stFormSubmitButton"] > button:hover {{
-        transform: translateY(-1px);
-        border-color: var(--sms-primary);
-        box-shadow: 0 6px 14px rgba(79, 70, 229, 0.18);
+    [data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"] {{
+        background: var(--sms-sidebar-active-bg) !important;
+        color: var(--sms-sidebar-active-text) !important;
+    }}
+
+    [data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"] {{
+        background: var(--sms-sidebar-inactive-bg) !important;
+        color: var(--sms-sidebar-text) !important;
     }}
 
     .sms-page-subtitle {{
-        color: var(--sms-muted);
-        margin-top: -0.25rem;
-        margin-bottom: 0.5rem;
+        color: var(--sms-muted) !important;
+        margin-top: -0.2rem;
+        margin-bottom: 0.6rem;
     }}
 
     .sms-sidebar-section {{
         margin-top: 0.75rem;
         margin-bottom: 0.5rem;
-        color: var(--sms-muted);
+        color: var(--sms-muted) !important;
         font-size: 0.82rem;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-    }}
-
-    @media (max-width: 768px) {{
-        .block-container {{
-            padding-left: 0.8rem;
-            padding-right: 0.8rem;
-        }}
     }}
     </style>
     """
@@ -420,14 +367,14 @@ def render_theme_toggle() -> None:
     col1, col2 = st.columns(2)
     with col1:
         dark_clicked = st.button(
-            "Dark Mode 🌙",
+            "Dark",
             type="primary" if current_theme == "dark" else "secondary",
             key="theme_dark_button",
             disabled=bool(st.session_state.get("is_loading", False)),
         )
     with col2:
         light_clicked = st.button(
-            "Light Mode ☀️",
+            "Light",
             type="primary" if current_theme == "light" else "secondary",
             key="theme_light_button",
             disabled=bool(st.session_state.get("is_loading", False)),
@@ -456,14 +403,19 @@ def show_loading(message: str) -> Iterator[None]:
 
 
 def render_page_header(title: str, subtitle: str) -> None:
-    st.title(title)
+    st.markdown(f"# 🎓 {title}")
     st.markdown(f"<div class='sms-page-subtitle'>{subtitle}</div>", unsafe_allow_html=True)
     st.divider()
 
 
 @contextmanager
 def card(title: str = "", subtitle: str = "") -> Iterator[None]:
-    with st.container(border=True):
+    try:
+        container = st.container(border=True, height="stretch")
+    except Exception:
+        container = st.container(border=True)
+
+    with container:
         if title:
             st.markdown(f"#### {title}")
         if subtitle:

@@ -6,7 +6,7 @@ import streamlit as st
 
 from frontend.components.forms import build_option_map, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
-from frontend.ui_theme import card, controls_disabled, render_page_header, show_loading
+from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
 from system_admin import service_layer
 from system_admin.google_sheets_utils import safe_sheet_read
 
@@ -91,28 +91,23 @@ def _session_selector() -> Tuple[str, Dict[str, str]]:
         st.session_state["selected_session_id"] = ""
         return "", session_map
 
-    labels = ["Select session context"] + list(session_map.keys())
+    labels = list(session_map.keys())
     selected_session_id = str(st.session_state.get("selected_session_id", "")).strip()
 
     default_index = 0
     if selected_session_id:
         for idx, label in enumerate(labels):
-            if label == "Select session context":
-                continue
             if get_select_value(session_map, label) == selected_session_id:
                 default_index = idx
                 break
 
-    selected_label = st.selectbox(
+    selected_label = pill_select(
         "Session Context",
         labels,
-        index=default_index,
         key="admin_selected_session_label",
+        default_index=default_index,
         disabled=controls_disabled(),
     )
-    if selected_label == "Select session context":
-        st.session_state["selected_session_id"] = ""
-        return "", session_map
 
     selected_session_id = get_select_value(session_map, selected_label)
     st.session_state["selected_session_id"] = selected_session_id
@@ -392,6 +387,8 @@ def _render_principal_management(admin_id: str, selected_session_id: str) -> Non
 
 
 def render_admin_page(selected_page: str, admin_id: str) -> None:
+    ensure_page_config()
+
     if controls_disabled():
         st.warning("Please wait, loading data...")
         st.stop()

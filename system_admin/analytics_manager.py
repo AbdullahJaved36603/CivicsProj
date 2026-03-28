@@ -71,6 +71,19 @@ def _response(success: bool, message: str, data: Optional[Dict[str, Any]] = None
     return payload
 
 
+def _strip_ids_from_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).endswith("_id"):
+                continue
+            cleaned[key] = _strip_ids_from_payload(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_strip_ids_from_payload(item) for item in value]
+    return value
+
+
 class AnalyticsManager:
     def __init__(self, controller: Optional[GoogleSheetsController] = None) -> None:
         self.controller = controller or get_controller()
@@ -618,14 +631,14 @@ class AnalyticsManager:
             return _response(
                 True,
                 "Teacher subject analytics fetched successfully.",
-                {
+                _strip_ids_from_payload({
                     "teacher_id": normalized_teacher_id,
                     "subject_id": normalized_subject_id,
                     "subject_name": subject_name,
                     "exam_session_id": normalized_exam_session_id,
                     "overall": overall_metrics,
                     "by_class": class_rows,
-                },
+                }),
             )
         except Exception as exc:
             return _response(False, f"Failed to fetch teacher subject analytics: {exc}")
@@ -688,7 +701,7 @@ class AnalyticsManager:
             return _response(
                 True,
                 "Class analytics fetched successfully.",
-                {
+                _strip_ids_from_payload({
                     "school_id": school_id,
                     "school_name": school_name,
                     "class_id": normalized_class_id,
@@ -698,7 +711,7 @@ class AnalyticsManager:
                     "exam_session_id": normalized_exam_session_id,
                     "overall": overall_metrics,
                     "subject_wise": subject_rows,
-                },
+                }),
             )
         except Exception as exc:
             return _response(False, f"Failed to fetch class analytics: {exc}")
@@ -802,7 +815,7 @@ class AnalyticsManager:
             return _response(
                 True,
                 "School analytics fetched successfully.",
-                {
+                _strip_ids_from_payload({
                     "school_id": normalized_school_id,
                     "school_name": school_name,
                     "exam_session_id": normalized_exam_session_id,
@@ -812,7 +825,7 @@ class AnalyticsManager:
                     "class_wise": class_rows,
                     "subject_wise": subject_rows,
                     "class_detail": class_detail,
-                },
+                }),
             )
         except Exception as exc:
             return _response(False, f"Failed to fetch school analytics: {exc}")
@@ -902,7 +915,7 @@ class AnalyticsManager:
             return _response(
                 True,
                 "Session analytics fetched successfully.",
-                {
+                _strip_ids_from_payload({
                     "session_id": normalized_session_id,
                     "exam_session_id": normalized_exam_session_id,
                     "school_id": normalized_school_id,
@@ -911,7 +924,7 @@ class AnalyticsManager:
                     "schools": school_rows,
                     "school_comparison": school_comparison,
                     "class_section_analytics": class_section_rows,
-                },
+                }),
             )
         except Exception as exc:
             return _response(False, f"Failed to fetch session analytics: {exc}")

@@ -3,12 +3,13 @@ from __future__ import annotations
 from io import StringIO
 from typing import Any, Callable, Dict, List
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from frontend.components.forms import build_option_map, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
-from frontend.ui_theme import card, controls_disabled, render_page_header, show_loading
+from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
 from system_admin import service_layer
 from system_admin.google_sheets_utils import safe_sheet_read
 
@@ -17,9 +18,34 @@ def _records_to_csv(records: List[Dict[str, Any]]) -> str:
     if not records:
         return ""
     frame = pd.DataFrame(records)
+    id_columns = [column for column in frame.columns if str(column).endswith("_id")]
+    if id_columns:
+        frame = frame.drop(columns=id_columns, errors="ignore")
     csv_buffer = StringIO()
     frame.to_csv(csv_buffer, index=False)
     return csv_buffer.getvalue()
+
+
+def _altair_bar(data: pd.DataFrame, x_field: str, y_field: str, color_field: str = "") -> alt.Chart:
+    encode_args: Dict[str, Any] = {
+        "x": alt.X(f"{x_field}:N", sort="-y"),
+        "y": alt.Y(f"{y_field}:Q"),
+        "tooltip": [x_field, y_field],
+    }
+    if color_field:
+        encode_args["color"] = alt.Color(f"{color_field}:N")
+    return alt.Chart(data).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(**encode_args)
+
+
+def _altair_line(data: pd.DataFrame, x_field: str, y_field: str, color_field: str = "") -> alt.Chart:
+    encode_args: Dict[str, Any] = {
+        "x": alt.X(f"{x_field}:N"),
+        "y": alt.Y(f"{y_field}:Q"),
+        "tooltip": [x_field, y_field],
+    }
+    if color_field:
+        encode_args["color"] = alt.Color(f"{color_field}:N")
+    return alt.Chart(data).mark_line(point=True).encode(**encode_args)
 
 
 def _safe_backend_call(api_func: Callable[[], Dict[str, Any]], spinner_text: str) -> Dict[str, Any]:
@@ -82,7 +108,8 @@ def _render_pass_fail_chart(metrics: Dict[str, Any]) -> None:
             {"Status": "Absent", "Students": _safe_int(metrics.get("absent_students", 0))},
         ]
     )
-    st.bar_chart(pass_fail_frame, x="Status", y="Students")
+    with st.container(border=True):
+        st.altair_chart(_altair_bar(pass_fail_frame, "Status", "Students", "Status"), use_container_width=True)
 
 
 def _render_gender_chart(metrics: Dict[str, Any]) -> None:
@@ -100,7 +127,9 @@ def _render_gender_chart(metrics: Dict[str, Any]) -> None:
             },
         ]
     )
-    st.bar_chart(gender_frame, x="Gender", y=["Pass", "Fail"])
+    with st.container(border=True):
+        gender_long = gender_frame.melt(id_vars=["Gender"], var_name="Outcome", value_name="Students")
+        st.altair_chart(_altair_bar(gender_long, "Gender", "Students", "Outcome"), use_container_width=True)
 
 
 def _exam_session_selector(session_id: str, key: str) -> str:
@@ -113,7 +142,12 @@ def _exam_session_selector(session_id: str, key: str) -> str:
     if not session_map:
         st.warning("No exam sessions found for selected session.")
         return ""
-    selected_label = st.selectbox("Exam Session", list(session_map.keys()), key=key, disabled=controls_disabled())
+    selected_label = pill_select(
+        "Exam Session",
+        list(session_map.keys()),
+        key=key,
+        disabled=controls_disabled(),
+    )
     return get_select_value(session_map, selected_label)
 
 
@@ -127,13 +161,19 @@ def _optional_filter_select(
 ) -> str:
     option_map = build_option_map(items, id_key, name_key)
     labels = [all_label] + list(option_map.keys())
-    selected_label = st.selectbox(label, labels, key=key, disabled=controls_disabled())
+    selected_label = pill_select(
+        label,
+        labels,
+        key=key,
+        disabled=controls_disabled(),
+    )
     if selected_label == all_label:
         return ""
     return get_select_value(option_map, selected_label)
 
 
 def render_admin_analytics(admin_id: str) -> None:
+    ensure_page_config()
     if controls_disabled():
         st.warning("Please wait, loading data...")
         st.stop()
@@ -250,8 +290,16 @@ def render_admin_analytics(admin_id: str) -> None:
         with card("School Comparison", "Pass percentage and average marks by school"):
             comparison_frame = pd.DataFrame(school_comparison)
             st.dataframe(comparison_frame, use_container_width=True)
-            st.bar_chart(comparison_frame, x="school_name", y="pass_percentage")
-            st.bar_chart(comparison_frame, x="school_name", y="average_marks")
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_bar(comparison_frame, "school_name", "pass_percentage", "school_name"),
+                    use_container_width=True,
+                )
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_bar(comparison_frame, "school_name", "average_marks", "school_name"),
+                    use_container_width=True,
+                )
 
             comparison_csv = _records_to_csv(school_comparison)
             if comparison_csv:
@@ -269,7 +317,11 @@ def render_admin_analytics(admin_id: str) -> None:
             class_frame = pd.DataFrame(class_section_rows)
             class_frame["school_class"] = class_frame["school_name"].astype(str) + " - " + class_frame["class_label"].astype(str)
             st.dataframe(class_frame, use_container_width=True)
-            st.line_chart(class_frame, x="school_class", y="pass_percentage")
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_line(class_frame, "school_class", "pass_percentage"),
+                    use_container_width=True,
+                )
 
             class_csv = _records_to_csv(class_section_rows)
             if class_csv:
@@ -286,6 +338,7 @@ def render_admin_analytics(admin_id: str) -> None:
 
 
 def render_principal_analytics(principal_id: str) -> None:
+    ensure_page_config()
     if controls_disabled():
         st.warning("Please wait, loading data...")
         st.stop()
@@ -315,11 +368,11 @@ def render_principal_analytics(principal_id: str) -> None:
                 default_index = index
                 break
 
-    selected_label = st.selectbox(
+    selected_label = pill_select(
         "School Context",
         labels,
-        index=default_index,
         key="principal_analytics_school_label",
+        default_index=default_index,
         disabled=controls_disabled(),
     )
     selected_school_id = get_select_value(school_map, selected_label)
@@ -392,14 +445,22 @@ def render_principal_analytics(principal_id: str) -> None:
         with card("Class-wise Analytics", "Class performance overview"):
             class_frame = pd.DataFrame(class_rows)
             st.dataframe(class_frame, use_container_width=True)
-            st.bar_chart(class_frame, x="class_label", y="pass_percentage")
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_bar(class_frame, "class_label", "pass_percentage", "class_label"),
+                    use_container_width=True,
+                )
 
     subject_rows = payload.get("subject_wise", [])
     if subject_rows:
         with card("Subject-wise Analytics", "Subject trend comparison"):
             subject_frame = pd.DataFrame(subject_rows)
             st.dataframe(subject_frame, use_container_width=True)
-            st.bar_chart(subject_frame, x="subject_name", y="average_marks")
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_bar(subject_frame, "subject_name", "average_marks", "subject_name"),
+                    use_container_width=True,
+                )
 
     downloadable_rows = subject_rows if subject_rows else class_rows
     csv_data = _records_to_csv(downloadable_rows)
@@ -415,6 +476,7 @@ def render_principal_analytics(principal_id: str) -> None:
 
 
 def render_teacher_analytics(teacher_id: str) -> None:
+    ensure_page_config()
     if controls_disabled():
         st.warning("Please wait, loading data...")
         st.stop()
@@ -435,7 +497,7 @@ def render_teacher_analytics(teacher_id: str) -> None:
         st.warning("No school context found for teacher.")
         return
 
-    selected_label = st.selectbox(
+    selected_label = pill_select(
         "School Context",
         list(school_map.keys()),
         key="teacher_analytics_school_label",
@@ -510,14 +572,22 @@ def render_teacher_analytics(teacher_id: str) -> None:
         with card("Class-wise Analytics", "Class-level trend view"):
             class_frame = pd.DataFrame(class_rows)
             st.dataframe(class_frame, use_container_width=True)
-            st.line_chart(class_frame, x="class_label", y="pass_percentage")
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_line(class_frame, "class_label", "pass_percentage"),
+                    use_container_width=True,
+                )
 
     subject_rows = payload.get("subject_wise", [])
     if subject_rows:
         with card("Subject-wise Analytics", "Subject trend view"):
             subject_frame = pd.DataFrame(subject_rows)
             st.dataframe(subject_frame, use_container_width=True)
-            st.bar_chart(subject_frame, x="subject_name", y="average_marks")
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_bar(subject_frame, "subject_name", "average_marks", "subject_name"),
+                    use_container_width=True,
+                )
 
     csv_data = _records_to_csv(subject_rows if subject_rows else class_rows)
     if csv_data:

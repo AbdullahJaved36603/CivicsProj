@@ -4,12 +4,13 @@ import time
 from io import StringIO
 from typing import Any, Callable, Dict, List
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from frontend.components.forms import build_option_map, form_heading, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
-from frontend.ui_theme import card, controls_disabled, render_page_header, show_loading
+from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
 from system_admin import service_layer
 from system_admin.google_sheets_utils import parse_marks, safe_sheet_read
 
@@ -127,6 +128,9 @@ def _records_to_csv(records: List[Dict[str, Any]]) -> str:
     if not records:
         return ""
     frame = pd.DataFrame(records)
+    id_columns = [column for column in frame.columns if str(column).endswith("_id")]
+    if id_columns:
+        frame = frame.drop(columns=id_columns, errors="ignore")
     csv_buffer = StringIO()
     frame.to_csv(csv_buffer, index=False)
     return csv_buffer.getvalue()
@@ -134,22 +138,43 @@ def _records_to_csv(records: List[Dict[str, Any]]) -> str:
 
 def _validate_marks_rows(rows: List[Dict[str, Any]], total_marks: str) -> str:
     for row in rows:
-        student_id = str(row.get("student_id", "")).strip()
         marks_value = row.get("marks", "")
         parsed = parse_marks(marks_value, total_marks)
         if parsed.get("is_valid", False):
             continue
         error_code = str(parsed.get("error", "")).strip()
         if error_code == "marks_not_numeric":
-            return f"Invalid marks for {student_id}: use numeric value or A/Absent."
+            return "Invalid marks entered: use numeric value or A/Absent."
         if error_code == "marks_negative":
-            return f"Invalid marks for {student_id}: marks cannot be negative."
+            return "Invalid marks entered: marks cannot be negative."
         if error_code == "marks_exceed_total":
-            return f"Invalid marks for {student_id}: marks cannot exceed total marks."
+            return "Invalid marks entered: marks cannot exceed total marks."
         if error_code == "total_marks_invalid":
             return "Total Marks must be greater than zero."
-        return f"Invalid marks for {student_id}."
+        return "Invalid marks entered."
     return ""
+
+
+def _altair_bar(data: pd.DataFrame, x_field: str, y_field: str, color_field: str = "") -> alt.Chart:
+    encode_args: Dict[str, Any] = {
+        "x": alt.X(f"{x_field}:N", sort="-y"),
+        "y": alt.Y(f"{y_field}:Q"),
+        "tooltip": [x_field, y_field],
+    }
+    if color_field:
+        encode_args["color"] = alt.Color(f"{color_field}:N")
+    return alt.Chart(data).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(**encode_args)
+
+
+def _altair_line(data: pd.DataFrame, x_field: str, y_field: str, color_field: str = "") -> alt.Chart:
+    encode_args: Dict[str, Any] = {
+        "x": alt.X(f"{x_field}:N"),
+        "y": alt.Y(f"{y_field}:Q"),
+        "tooltip": [x_field, y_field],
+    }
+    if color_field:
+        encode_args["color"] = alt.Color(f"{color_field}:N")
+    return alt.Chart(data).mark_line(point=True).encode(**encode_args)
 
 
 def _render_summary_metrics(title: str, metrics: Dict[str, Any]) -> None:
@@ -181,7 +206,9 @@ def _render_pass_fail_and_gender_charts(metrics: Dict[str, Any], key_prefix: str
             {"Status": "Absent", "Students": int(metrics.get("absent_students", 0))},
         ]
     )
-    st.bar_chart(pass_fail_frame, x="Status", y="Students")
+    with st.container(border=True):
+        st.markdown("##### Pass/Fail Distribution")
+        st.altair_chart(_altair_bar(pass_fail_frame, "Status", "Students", "Status"), use_container_width=True)
 
     gender_frame = pd.DataFrame(
         [
@@ -197,7 +224,13 @@ def _render_pass_fail_and_gender_charts(metrics: Dict[str, Any], key_prefix: str
             },
         ]
     )
-    st.bar_chart(gender_frame, x="Gender", y=["Pass", "Fail"])
+    with st.container(border=True):
+        st.markdown("##### Gender Breakdown")
+        gender_long = gender_frame.melt(id_vars=["Gender"], var_name="Outcome", value_name="Students")
+        st.altair_chart(
+            _altair_bar(gender_long, "Gender", "Students", "Outcome"),
+            use_container_width=True,
+        )
 
     csv_data = _records_to_csv(gender_frame.to_dict("records"))
     if csv_data:
@@ -223,14 +256,24 @@ def _render_student_enrollment(teacher_id: str) -> None:
         return
 
     with st.form("enroll_student_form"):
-        selected_class = st.selectbox("Class", list(class_map.keys()), disabled=_loading())
+        selected_class = pill_select(
+            "Class",
+            list(class_map.keys()),
+            key="teacher_enroll_class",
+            disabled=_loading(),
+        )
         col1, col2, col3 = st.columns(3)
         with col1:
             student_name = st.text_input("Student name", disabled=_loading())
         with col2:
             parent_name = st.text_input("Parent name", disabled=_loading())
         with col3:
-            gender = st.selectbox("Gender", ["Male", "Female"], disabled=_loading())
+            gender = pill_select(
+                "Gender",
+                ["Male", "Female"],
+                key="teacher_enroll_gender",
+                disabled=_loading(),
+            )
         enroll_label = "⏳ Enrolling..." if _loading() else "Enroll Student"
         submitted = st.form_submit_button(enroll_label, disabled=_loading(), use_container_width=True)
 
@@ -259,7 +302,7 @@ def _render_results_entry(teacher_id: str) -> None:
         st.info("No accessible classes available.")
         return
 
-    selected_class_label = st.selectbox(
+    selected_class_label = pill_select(
         "Class",
         list(class_map.keys()),
         key="teacher_results_class",
@@ -280,13 +323,13 @@ def _render_results_entry(teacher_id: str) -> None:
         st.info("No exam sessions available for your school's session.")
         return
 
-    selected_exam_session = st.selectbox(
+    selected_exam_session = pill_select(
         "Exam Session",
         list(exam_session_map.keys()),
         key="teacher_grid_exam",
         disabled=_loading(),
     )
-    selected_subject = st.selectbox(
+    selected_subject = pill_select(
         "Subject",
         list(subject_map.keys()),
         key="teacher_grid_subject",
@@ -372,7 +415,7 @@ def _render_results_entry(teacher_id: str) -> None:
         hide_index=True,
         use_container_width=True,
         column_config={
-            "student_id": st.column_config.TextColumn("Student ID"),
+            "student_id": None,
             "student_name": st.column_config.TextColumn("Student Name"),
             "parent_name": st.column_config.TextColumn("Parent Name"),
             "gender": st.column_config.TextColumn("Gender"),
@@ -445,7 +488,7 @@ def _render_analytics_sections(teacher_id: str) -> None:
         st.info("No exam sessions available for analytics.")
         return
 
-    selected_exam_session_label = st.selectbox(
+    selected_exam_session_label = pill_select(
         "Exam Session",
         list(exam_session_map.keys()),
         key="teacher_analytics_exam_session",
@@ -459,7 +502,7 @@ def _render_analytics_sections(teacher_id: str) -> None:
 
     st.markdown("##### Class Incharge Analytics")
     if incharge_class_map:
-        selected_class_label = st.selectbox(
+        selected_class_label = pill_select(
             "Class",
             list(incharge_class_map.keys()),
             key="teacher_incharge_analytics_class",
@@ -486,7 +529,11 @@ def _render_analytics_sections(teacher_id: str) -> None:
                 st.markdown("##### Subject-wise Performance")
                 subject_frame = pd.DataFrame(subject_rows)
                 st.dataframe(subject_frame, use_container_width=True)
-                st.bar_chart(subject_frame, x="subject_name", y="average_marks")
+                with st.container(border=True):
+                    st.altair_chart(
+                        _altair_bar(subject_frame, "subject_name", "average_marks", "subject_name"),
+                        use_container_width=True,
+                    )
 
                 subject_csv = _records_to_csv(subject_rows)
                 if subject_csv:
@@ -504,7 +551,7 @@ def _render_analytics_sections(teacher_id: str) -> None:
     st.markdown("##### Subject Analytics")
     class_map = build_option_map(classes, "class_id", "class_name")
     if class_map:
-        selected_class_label = st.selectbox(
+        selected_class_label = pill_select(
             "Class",
             list(class_map.keys()),
             key="teacher_subject_analytics_class",
@@ -514,7 +561,7 @@ def _render_analytics_sections(teacher_id: str) -> None:
         subjects = _teacher_subjects(teacher_id, selected_class_id)
         subject_map = build_option_map(subjects, "subject_id", "subject_name")
         if subject_map:
-            selected_subject_label = st.selectbox(
+            selected_subject_label = pill_select(
                 "Subject",
                 list(subject_map.keys()),
                 key="teacher_subject_analytics_subject",
@@ -549,8 +596,16 @@ def _render_analytics_sections(teacher_id: str) -> None:
                     st.markdown("##### Class-wise Subject Trends")
                     by_class_frame = pd.DataFrame(by_class)
                     st.dataframe(by_class_frame, use_container_width=True)
-                    st.line_chart(by_class_frame, x="class_label", y="pass_percentage")
-                    st.bar_chart(by_class_frame, x="class_label", y="average_marks")
+                    with st.container(border=True):
+                        st.altair_chart(
+                            _altair_line(by_class_frame, "class_label", "pass_percentage"),
+                            use_container_width=True,
+                        )
+                    with st.container(border=True):
+                        st.altair_chart(
+                            _altair_bar(by_class_frame, "class_label", "average_marks", "class_label"),
+                            use_container_width=True,
+                        )
 
                     class_csv = _records_to_csv(by_class)
                     if class_csv:
@@ -569,6 +624,7 @@ def _render_analytics_sections(teacher_id: str) -> None:
 
 
 def render_teacher_page(selected_page: str, teacher_id: str) -> None:
+    ensure_page_config()
     _init_ui_state()
 
     if _loading():
