@@ -40,34 +40,48 @@ def _route_authenticated_user() -> None:
         st.error("Access denied")
         return
 
+    normalized_page = str(selected_page).strip().casefold()
+
     if role in {"admin", "super_user", "superuser"}:
-        if selected_page in {"School Management", "Session Management", "Principal Management", "Global Analytics"}:
+        if normalized_page in {
+            "school management",
+            "session management",
+            "principal management",
+            "global analytics",
+            "analytics",
+        }:
             admin_dashboard.render_admin_page(selected_page, user_id)
             return
-        if selected_page == "Profile Settings":
+        if normalized_page == "profile settings":
             profile_settings.render_profile_settings(user_id, username)
             return
         st.error("Access denied")
         return
 
     if role == "principal":
-        if selected_page in {"Class Management", "Subject Management", "Teacher Management", "Assignments", "Class Incharge"}:
+        if normalized_page in {
+            "class management",
+            "subject management",
+            "teacher management",
+            "assignments",
+            "class incharge",
+        }:
             principal_dashboard.render_principal_page(selected_page, user_id)
             return
-        if selected_page == "School Analytics":
+        if normalized_page == "school analytics":
             analytics_page.render_principal_analytics(user_id)
             return
-        if selected_page == "Profile Settings":
+        if normalized_page == "profile settings":
             profile_settings.render_profile_settings(user_id, username)
             return
         st.error("Access denied")
         return
 
     if role == "teacher":
-        if selected_page in {"Student Enrollment", "Results Entry", "School Analytics"}:
+        if normalized_page in {"student enrollment", "results entry", "school analytics"}:
             teacher_dashboard.render_teacher_page(selected_page, user_id)
             return
-        if selected_page == "Profile Settings":
+        if normalized_page == "profile settings":
             profile_settings.render_profile_settings(user_id, username)
             return
         st.error("Access denied")

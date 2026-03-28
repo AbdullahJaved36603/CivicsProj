@@ -585,16 +585,18 @@ def render_admin_page(selected_page: str, admin_id: str) -> None:
     with card("Session Context", "Choose which session your admin actions should target"):
         selected_session_id, _ = _session_selector()
 
-    if selected_page == "School Management":
+    normalized_page = str(selected_page).strip().casefold()
+
+    if normalized_page == "school management":
         _render_school_management(admin_id, selected_session_id)
         return
-    if selected_page == "Session Management":
+    if normalized_page == "session management":
         _render_session_management(admin_id, selected_session_id)
         return
-    if selected_page == "Principal Management":
+    if normalized_page == "principal management":
         _render_principal_management(admin_id, selected_session_id)
         return
-    if selected_page == "Global Analytics":
+    if normalized_page in {"global analytics", "analytics"}:
         _render_global_analytics(admin_id, selected_session_id)
         return
 

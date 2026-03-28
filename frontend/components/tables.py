@@ -15,6 +15,50 @@ def _class_label(record: Dict[str, Any]) -> str:
 
 
 def _sanitize_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _display_value(value: Any) -> Any:
+        if isinstance(value, list):
+            if not value:
+                return ""
+            if all(isinstance(item, dict) for item in value):
+                extracted: List[str] = []
+                for item in value:
+                    school_name = str(item.get("school_name", "")).strip()
+                    class_label = str(item.get("class_label", "")).strip()
+                    subject_name = str(item.get("subject_name", "")).strip()
+                    username = str(item.get("username", "")).strip()
+                    principal_name = str(item.get("principal_username", "")).strip()
+                    teacher_name = str(item.get("teacher_name", "")).strip()
+
+                    preferred = (
+                        school_name
+                        or class_label
+                        or subject_name
+                        or username
+                        or principal_name
+                        or teacher_name
+                    )
+                    if preferred:
+                        extracted.append(preferred)
+                    else:
+                        extracted.append(
+                            ", ".join(
+                                f"{k}: {v}" for k, v in item.items() if not str(k).endswith("_id") and str(v).strip()
+                            )
+                        )
+                extracted = [entry for entry in extracted if entry]
+                return ", ".join(extracted)
+            return ", ".join(str(item) for item in value)
+
+        if isinstance(value, dict):
+            parts = [
+                f"{key.replace('_', ' ').title()}: {val}"
+                for key, val in value.items()
+                if not str(key).endswith("_id") and str(val).strip()
+            ]
+            return " | ".join(parts)
+
+        return value
+
     sanitized: List[Dict[str, Any]] = []
     for row in records:
         cleaned = dict(row)
@@ -29,6 +73,9 @@ def _sanitize_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         # Avoid exposing raw sheet URLs in UI tables.
         cleaned.pop("school_sheet_url", None)
+
+        for key, value in list(cleaned.items()):
+            cleaned[key] = _display_value(value)
 
         sanitized.append(cleaned)
     return sanitized
