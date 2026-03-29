@@ -405,7 +405,7 @@ def _safe_excel_sheet_name(base_name: str, used: set[str]) -> str:
 
 def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str, List[Dict[str, Any]]]) -> Tuple[bytes | None, str | None]:
     engine_candidates = ["openpyxl", "xlsxwriter"]
-    last_error: str | None = None
+    engine_errors: List[str] = []
 
     for engine in engine_candidates:
         try:
@@ -454,9 +454,9 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
 
             return buffer.getvalue(), None
         except (ImportError, ModuleNotFoundError, ValueError) as exc:
-            last_error = str(exc)
+            engine_errors.append(f"{engine}: {exc}")
 
-    return None, last_error
+    return None, "; ".join(engine_errors) if engine_errors else None
 
 
 def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
