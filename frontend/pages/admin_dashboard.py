@@ -460,6 +460,86 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
     return None, "; ".join(engine_errors) if engine_errors else None
 
 
+def _extract_class_export_rows(payload: Dict[str, Any], class_name: str) -> List[Dict[str, Any]]:
+    export_sheets = payload.get("export_sheets", {})
+    if not isinstance(export_sheets, dict):
+        return []
+
+    class_rows = export_sheets.get(class_name, [])
+    rows: List[Dict[str, Any]] = []
+    if isinstance(class_rows, list) and class_rows:
+        rows = class_rows
+    else:
+        for sheet_rows in export_sheets.values():
+            if isinstance(sheet_rows, list):
+                rows.extend(sheet_rows)
+
+    if not rows:
+        return []
+
+    rows_df = pd.DataFrame(rows)
+    sort_cols = [col for col in ["School", "Section", "Subject", "Teacher"] if col in rows_df.columns]
+    if sort_cols:
+        rows_df = rows_df.sort_values(by=sort_cols, ignore_index=True)
+    return rows_df.to_dict("records")
+
+
+def _build_all_class_export_sheets(
+    admin_id: str,
+    session_id: str,
+    exam_session_id: str,
+    class_names: List[str],
+    selected_class_name: str,
+    selected_payload: Dict[str, Any],
+) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
+    all_export_sheets: Dict[str, List[Dict[str, Any]]] = {}
+    failed_classes: List[str] = []
+
+    for class_name in class_names:
+        normalized_class_name = str(class_name).strip()
+        if not normalized_class_name:
+            continue
+
+        class_payload: Dict[str, Any]
+        if normalized_class_name.casefold() == str(selected_class_name).strip().casefold():
+            class_payload = selected_payload
+        else:
+            class_response = _safe_backend_call(
+                lambda class_value=normalized_class_name: service_layer.get_admin_class_hierarchical_analytics(
+                    admin_id,
+                    session_id,
+                    exam_session_id,
+                    class_value,
+                ),
+                f"Loading export rows for class {normalized_class_name}...",
+            )
+            if not class_response.get("success"):
+                failed_classes.append(normalized_class_name)
+                continue
+            class_payload = class_response.get("data", {})
+
+        rows = _extract_class_export_rows(class_payload, normalized_class_name)
+        if not rows:
+            rows = [
+                {
+                    "School": "No data available",
+                    "Section": "-",
+                    "Subject": "No data available",
+                    "Teacher": "-",
+                    "Total": 0,
+                    "Appeared": 0,
+                    "Absent": 0,
+                    "Passed": 0,
+                    "Failed": 0,
+                    "Pass %": 0.0,
+                    "Fail %": 0.0,
+                }
+            ]
+        all_export_sheets[normalized_class_name] = rows
+
+    return all_export_sheets, failed_classes
+
+
 def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
     with card("Global Analytics", "Hierarchical class-section analytics grouped by school"):
         if not selected_session_id:
@@ -571,10 +651,15 @@ def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
         else:
             st.info("No analytics rows found for selected filters.")
 
-        export_sheets = payload.get("export_sheets", {})
-        sections = payload.get("sections", [])
-        if not sections:
-            sections = sorted(export_sheets.keys())
+        export_sheets, failed_classes = _build_all_class_export_sheets(
+            admin_id=admin_id,
+            session_id=selected_session_id,
+            exam_session_id=selected_exam_session_id,
+            class_names=class_names,
+            selected_class_name=selected_class_name,
+            selected_payload=payload,
+        )
+        sections = sorted(export_sheets.keys())
 
         if sections:
             workbook_bytes, error_message = _build_admin_analytics_workbook(sections, export_sheets)
@@ -583,6 +668,9 @@ def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
                 if error_message:
                     st.caption(f"Export engine error: {error_message}")
                 return
+
+            if failed_classes:
+                st.caption(f"Some classes were skipped in export due to load issues: {', '.join(sorted(failed_classes))}")
 
             st.download_button(
                 label="Download Analytics Report",
