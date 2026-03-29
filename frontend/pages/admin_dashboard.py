@@ -404,15 +404,14 @@ def _safe_excel_sheet_name(base_name: str, used: set[str]) -> str:
 
 
 def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str, List[Dict[str, Any]]]) -> Tuple[bytes | None, str | None]:
-    engine_candidates = ["xlsxwriter", "openpyxl", None]
+    engine_candidates = ["openpyxl", "xlsxwriter"]
     last_error: str | None = None
 
     for engine in engine_candidates:
         try:
             buffer = BytesIO()
             used_sheet_names: set[str] = set()
-            writer_kwargs = {"engine": engine} if engine else {}
-            with pd.ExcelWriter(buffer, **writer_kwargs) as writer:
+            with pd.ExcelWriter(buffer, engine=engine) as writer:
                 for section in sections:
                     section_rows = export_sheets.get(section, [])
                     if section_rows:
@@ -451,7 +450,7 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
                     section_df = section_df[export_columns] if export_columns else section_df
 
                     sheet_name = _safe_excel_sheet_name(str(section), used_sheet_names)
-                    section_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    section_df.to_excel(writer, sheet_name=sheet_name, engine=engine, index=False)
 
             return buffer.getvalue(), None
         except (ImportError, ModuleNotFoundError, ValueError) as exc:
