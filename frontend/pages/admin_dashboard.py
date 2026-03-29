@@ -470,6 +470,41 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
 
 
 def _extract_class_export_rows(payload: Dict[str, Any], class_name: str) -> List[Dict[str, Any]]:
+    grouped_rows = payload.get("grouped_rows", [])
+    if isinstance(grouped_rows, list) and grouped_rows:
+        normalized_class_name = str(class_name).strip().casefold()
+        grouped_export_rows: List[Dict[str, Any]] = []
+        for row in grouped_rows:
+            if not isinstance(row, dict):
+                continue
+            row_class = str(row.get("Class", "")).strip()
+            if normalized_class_name and row_class and row_class.casefold() != normalized_class_name:
+                continue
+            grouped_export_rows.append(
+                {
+                    "School": row.get("School", ""),
+                    "Class": row.get("Class", class_name),
+                    "Section": row.get("Section", "-"),
+                    "Subject": row.get("Subject", ""),
+                    "Teacher": row.get("Teacher", "-"),
+                    "Total": row.get("Total", row.get("Total Students", 0)),
+                    "Appeared": row.get("Appeared", 0),
+                    "Absent": row.get("Absent", 0),
+                    "Passed": row.get("Passed", 0),
+                    "Failed": row.get("Failed", 0),
+                    "Pass %": row.get("Pass %", 0.0),
+                    "Fail %": row.get("Fail %", 0.0),
+                }
+            )
+        if grouped_export_rows:
+            grouped_df = pd.DataFrame(grouped_export_rows)
+            sort_cols = [col for col in ["School", "Section", "Subject", "Teacher"] if col in grouped_df.columns]
+            if sort_cols:
+                grouped_df = grouped_df.sort_values(by=sort_cols, ignore_index=True)
+            grouped_df["Class"] = grouped_df["Class"].astype(str).replace("", class_name)
+            grouped_df["Section"] = grouped_df["Section"].astype(str).replace("", "-")
+            return grouped_df.to_dict("records")
+
     export_sheets = payload.get("export_sheets", {})
     if not isinstance(export_sheets, dict):
         return []
@@ -487,6 +522,16 @@ def _extract_class_export_rows(payload: Dict[str, Any], class_name: str) -> List
         return []
 
     rows_df = pd.DataFrame(rows)
+    if "Class" not in rows_df.columns:
+        for alt_col in ["class", "class_name", "Class Name"]:
+            if alt_col in rows_df.columns:
+                rows_df["Class"] = rows_df[alt_col]
+                break
+    if "Section" not in rows_df.columns:
+        for alt_col in ["section", "class_section", "Class Section"]:
+            if alt_col in rows_df.columns:
+                rows_df["Section"] = rows_df[alt_col]
+                break
     sort_cols = [col for col in ["School", "Section", "Subject", "Teacher"] if col in rows_df.columns]
     if sort_cols:
         rows_df = rows_df.sort_values(by=sort_cols, ignore_index=True)
