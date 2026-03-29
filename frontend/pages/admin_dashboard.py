@@ -422,6 +422,7 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
                                 {
                                     "School": "No data available",
                                     "Class": str(section),
+                                    "Section": "-",
                                     "Subject": "No data available",
                                     "Teacher": "-",
                                     "Total": 0,
@@ -449,6 +450,12 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
                         "Pass %",
                         "Fail %",
                     ]
+                    if "Class" not in section_df.columns:
+                        section_df["Class"] = str(section)
+                    if "Section" not in section_df.columns:
+                        section_df["Section"] = "-"
+                    section_df["Class"] = section_df["Class"].astype(str).replace("", str(section))
+                    section_df["Section"] = section_df["Section"].astype(str).replace("", "-")
                     export_columns = [col for col in ordered_export_cols if col in section_df.columns]
                     section_df = section_df[export_columns] if export_columns else section_df
 
@@ -485,6 +492,10 @@ def _extract_class_export_rows(payload: Dict[str, Any], class_name: str) -> List
         rows_df = rows_df.sort_values(by=sort_cols, ignore_index=True)
     if "Class" not in rows_df.columns:
         rows_df["Class"] = class_name
+    if "Section" not in rows_df.columns:
+        rows_df["Section"] = "-"
+    rows_df["Class"] = rows_df["Class"].astype(str).replace("", class_name)
+    rows_df["Section"] = rows_df["Section"].astype(str).replace("", "-")
     return rows_df.to_dict("records")
 
 
