@@ -6,6 +6,23 @@ from typing import Any, Dict, Iterable, Tuple
 import streamlit as st
 
 
+def _sanitize_error_message(message: str) -> str:
+    lowered = str(message).lower()
+    hidden_tokens = [
+        "quota",
+        "traceback",
+        "exception",
+        "invalid jwt",
+        "service account",
+        "googleapis",
+        "httperror",
+        "failed:",
+    ]
+    if any(token in lowered for token in hidden_tokens):
+        return "Service is temporarily busy. Please wait a moment and try again."
+    return message
+
+
 def build_option_map(
     items: Iterable[Dict[str, Any]],
     id_key: str,
@@ -41,6 +58,7 @@ def show_form_result(response: Dict[str, Any]) -> None:
         .replace("exam_session_id", "exam session")
         .replace("session_id", "session")
     )
+    friendly = _sanitize_error_message(friendly)
 
     if response.get("success"):
         st.success(friendly or "Operation completed successfully.")

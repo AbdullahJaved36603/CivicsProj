@@ -421,6 +421,7 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
                             [
                                 {
                                     "School": "No data available",
+                                    "Class": str(section),
                                     "Subject": "No data available",
                                     "Teacher": "-",
                                     "Total": 0,
@@ -436,6 +437,7 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
 
                     ordered_export_cols = [
                         "School",
+                        "Class",
                         "Section",
                         "Subject",
                         "Teacher",
@@ -481,6 +483,8 @@ def _extract_class_export_rows(payload: Dict[str, Any], class_name: str) -> List
     sort_cols = [col for col in ["School", "Section", "Subject", "Teacher"] if col in rows_df.columns]
     if sort_cols:
         rows_df = rows_df.sort_values(by=sort_cols, ignore_index=True)
+    if "Class" not in rows_df.columns:
+        rows_df["Class"] = class_name
     return rows_df.to_dict("records")
 
 
@@ -523,6 +527,7 @@ def _build_all_class_export_sheets(
             rows = [
                 {
                     "School": "No data available",
+                    "Class": normalized_class_name,
                     "Section": "-",
                     "Subject": "No data available",
                     "Teacher": "-",
