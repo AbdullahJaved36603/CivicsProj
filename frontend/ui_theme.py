@@ -222,6 +222,10 @@ def apply_theme() -> None:
         color: var(--sms-sidebar-text) !important;
     }}
 
+    [data-testid="stSidebarNav"] {{
+        display: none !important;
+    }}
+
     .stMarkdown, .stText, .stCaption, .stAlert, p, span, label, h1, h2, h3, h4, h5, h6 {{
         color: inherit !important;
     }}

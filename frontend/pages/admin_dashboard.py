@@ -436,6 +436,7 @@ def _build_admin_analytics_workbook(sections: List[str], export_sheets: Dict[str
 
                     ordered_export_cols = [
                         "School",
+                        "Section",
                         "Subject",
                         "Teacher",
                         "Total",
