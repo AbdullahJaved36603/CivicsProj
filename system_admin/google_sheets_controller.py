@@ -45,7 +45,7 @@ CLASSES_TAB_NAME = "classes"
 CLASSES_INCHARGE_HEADER = "class_incharge_teacher_id"
 CLASSES_SESSION_HEADER = "session_id"
 SUBJECTS_TAB_NAME = "subjects"
-SUBJECTS_HEADERS = ["subject_id", "class_id", "subject_name", "session_id"]
+SUBJECTS_HEADERS = ["subject_id", "class_id", "subject_name", "subject_type", "session_id"]
 EXAM_SESSIONS_TAB_NAME = "exam_sessions"
 EXAM_SESSIONS_HEADERS = ["exam_session_id", "session_id", "month"]
 SCHOOLS_TAB_NAME = "Schools"
@@ -468,31 +468,68 @@ class GoogleSheetsController:
             normalized_header = [str(value).strip().lower() for value in header]
             expected_normalized = [value.lower() for value in SUBJECTS_HEADERS]
             if normalized_header != expected_normalized:
-                if len(header) == 3 and "session_id" not in normalized_header:
-                    migrated_header = list(header) + ["session_id"]
-                    self.update_row(SUBJECTS_TAB_NAME, 1, migrated_header)
-                else:
-                    migrated_header = list(header)
-                    if len(migrated_header) < 4:
-                        migrated_header.extend([""] * (4 - len(migrated_header)))
-                    migrated_header[0] = "subject_id"
-                    migrated_header[1] = "class_id"
-                    migrated_header[2] = "subject_name"
-                    migrated_header[3] = "session_id"
-                    self.update_row(SUBJECTS_TAB_NAME, 1, migrated_header)
+                subject_id_index = next((i for i, value in enumerate(normalized_header) if value == "subject_id"), 0)
+                class_id_index = next((i for i, value in enumerate(normalized_header) if value == "class_id"), 1)
+                subject_name_index = next((i for i, value in enumerate(normalized_header) if value == "subject_name"), 2)
+                subject_type_index = next((i for i, value in enumerate(normalized_header) if value == "subject_type"), None)
+                session_id_index = next((i for i, value in enumerate(normalized_header) if value == "session_id"), None)
+
+                migrated_rows: List[List[str]] = [SUBJECTS_HEADERS]
+                for row in rows[1:]:
+                    subject_id = row[subject_id_index].strip() if subject_id_index < len(row) else ""
+                    class_id = row[class_id_index].strip() if class_id_index < len(row) else ""
+                    subject_name = row[subject_name_index].strip() if subject_name_index < len(row) else ""
+
+                    subject_type = ""
+                    if isinstance(subject_type_index, int) and subject_type_index < len(row):
+                        candidate_type = row[subject_type_index].strip().lower()
+                        if candidate_type in {"major", "minor"}:
+                            subject_type = candidate_type
+
+                    session_id = ""
+                    if isinstance(session_id_index, int) and session_id_index < len(row):
+                        session_id = row[session_id_index].strip()
+                    elif len(row) > 3:
+                        # Legacy 4-column schema: [subject_id, class_id, subject_name, session_id]
+                        legacy_session = row[3].strip()
+                        if legacy_session.lower() not in {"major", "minor"}:
+                            session_id = legacy_session
+
+                    migrated_rows.append([subject_id, class_id, subject_name, subject_type, session_id])
+
+                self._replace_master_tab_values(SUBJECTS_TAB_NAME, migrated_rows)
 
             self._subjects_schema_checked = True
         except Exception:
             return
 
     def _warn_duplicate_classes(self, rows: List[List[str]]) -> None:
+        if not rows:
+            return
+
+        header = rows[0]
+        class_id_index = self._header_index(header, ["class_id"])
+        if class_id_index is None:
+            class_id_index = 0
+
+        school_id_index = self._header_index(header, ["school_id"])
+        if school_id_index is None:
+            school_id_index = 1
+
+        class_name_index = self._header_index(header, ["class_name"])
+        if class_name_index is None:
+            class_name_index = 2
+        class_section_index = self._header_index(header, ["class_section", "section"])
+        if class_section_index is None:
+            class_section_index = 3
+
         seen: Dict[str, str] = {}
         duplicates: List[str] = []
         for row in rows[1:]:
-            school_id = row[1].strip() if len(row) > 1 else ""
-            class_name = row[2].strip().lower() if len(row) > 2 else ""
-            class_section = row[3].strip().lower() if len(row) > 3 else ""
-            class_id = row[0].strip() if len(row) > 0 else ""
+            school_id = row[school_id_index].strip().lower() if school_id_index < len(row) else ""
+            class_name = row[class_name_index].strip().lower() if class_name_index < len(row) else ""
+            class_section = row[class_section_index].strip().lower() if class_section_index < len(row) else ""
+            class_id = row[class_id_index].strip() if class_id_index < len(row) else ""
             if not school_id or not class_name or not class_section:
                 continue
             key = f"{school_id}|{class_name}|{class_section}"

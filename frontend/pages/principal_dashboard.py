@@ -243,11 +243,19 @@ def _render_subject_management(principal_id: str, school_id: str) -> None:
             disabled=_loading(),
         )
         subject_name = st.text_input("Subject name", disabled=_loading())
+        subject_type = st.selectbox("Subject type", ["Major", "Minor"], disabled=_loading())
         submitted = st.form_submit_button("Create Subject", disabled=_loading())
     if submitted:
         class_id = get_select_value(class_map, selected_class)
+        normalized_subject_type = str(subject_type).strip().lower()
         response = _safe_backend_call(
-            lambda: service_layer.create_subject(principal_id, school_id, class_id, subject_name),
+            lambda: service_layer.create_subject(
+                principal_id,
+                school_id,
+                class_id,
+                subject_name,
+                normalized_subject_type,
+            ),
             "Creating subject...",
         )
         show_form_result(response)
@@ -256,6 +264,54 @@ def _render_subject_management(principal_id: str, school_id: str) -> None:
             _invalidate_school_cache(school_id)
 
     subjects = _subjects(school_id)
+
+    if subjects:
+        subject_option_map: Dict[str, str] = {}
+        for index, item in enumerate(subjects, start=1):
+            subject_id = str(item.get("subject_id", "")).strip()
+            if not subject_id:
+                continue
+            class_name = str(item.get("class_name", "")).strip() or str(item.get("class_id", "")).strip()
+            subject_name = str(item.get("subject_name", "")).strip() or "Subject"
+            current_type = str(item.get("subject_type", "")).strip().lower()
+            current_type_label = current_type.title() if current_type in {"major", "minor"} else "Not Set"
+            label = f"{subject_name} ({class_name}) - Type: {current_type_label}"
+            if label in subject_option_map:
+                label = f"{label} #{index}"
+            subject_option_map[label] = subject_id
+
+        if subject_option_map:
+            with st.form("update_subject_type_form"):
+                selected_subject_label = st.selectbox(
+                    "Existing subject",
+                    list(subject_option_map.keys()),
+                    disabled=_loading(),
+                )
+                updated_subject_type = st.selectbox(
+                    "Update subject type",
+                    ["Major", "Minor"],
+                    key="principal_update_subject_type_value",
+                    disabled=_loading(),
+                )
+                update_submitted = st.form_submit_button("Update Subject Type", disabled=_loading())
+
+            if update_submitted:
+                selected_subject_id = get_select_value(subject_option_map, selected_subject_label)
+                normalized_updated_type = str(updated_subject_type).strip().lower()
+                update_response = _safe_backend_call(
+                    lambda: service_layer.update_subject_type(
+                        principal_id,
+                        school_id,
+                        selected_subject_id,
+                        normalized_updated_type,
+                    ),
+                    "Updating subject type...",
+                )
+                show_form_result(update_response)
+                show_response_payload(update_response)
+                if update_response.get("success"):
+                    _invalidate_school_cache(school_id)
+
     show_records("Subjects", subjects)
 
 

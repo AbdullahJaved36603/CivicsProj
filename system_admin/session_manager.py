@@ -58,7 +58,8 @@ class SubjectsColumns:
     SUBJECT_ID = 0
     CLASS_ID = 1
     SUBJECT_NAME = 2
-    SESSION_ID = 3
+    SUBJECT_TYPE = 3
+    SESSION_ID = 4
 
 
 def _response(success: bool, message: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -165,10 +166,18 @@ class SessionManager:
 
     def _rollback_new_session_data(self, new_session_id: str, folder_id: str, previous_active_session_id: str) -> None:
         try:
+            def _subject_session_id(row: List[str]) -> str:
+                if SubjectsColumns.SESSION_ID < len(row):
+                    return row[SubjectsColumns.SESSION_ID]
+                if len(row) > 3:
+                    legacy_value = row[3].strip()
+                    if legacy_value.lower() not in {"major", "minor"}:
+                        return legacy_value
+                return ""
+
             self._delete_rows_matching(
                 TAB_SUBJECTS,
-                lambda row: (row[SubjectsColumns.SESSION_ID] if SubjectsColumns.SESSION_ID < len(row) else "")
-                == new_session_id,
+                lambda row: _subject_session_id(row) == new_session_id,
             )
             self._delete_rows_matching(
                 TAB_CLASSES,
@@ -522,14 +531,32 @@ class SessionManager:
             }
 
         subject_rows = self.controller.read_tab(TAB_SUBJECTS)
+
+        def _row_subject_type(row: List[str]) -> str:
+            if SubjectsColumns.SUBJECT_TYPE < len(row):
+                candidate = row[SubjectsColumns.SUBJECT_TYPE].strip().lower()
+                if candidate in {"major", "minor"}:
+                    return candidate
+            return ""
+
+        def _row_session_id(row: List[str]) -> str:
+            if SubjectsColumns.SESSION_ID < len(row):
+                return row[SubjectsColumns.SESSION_ID].strip()
+            if len(row) > 3:
+                # Legacy schema fallback: [subject_id, class_id, subject_name, session_id]
+                legacy_value = row[3].strip()
+                if legacy_value.lower() not in {"major", "minor"}:
+                    return legacy_value
+            return ""
+
         source_subjects = [
             row
             for row in subject_rows[1:]
             if SubjectsColumns.CLASS_ID < len(row)
             and row[SubjectsColumns.CLASS_ID] in source_to_new_class_map
             and (
-                (SubjectsColumns.SESSION_ID < len(row) and row[SubjectsColumns.SESSION_ID] == previous_session_id)
-                or (SubjectsColumns.SESSION_ID >= len(row))
+                (_row_session_id(row) == previous_session_id)
+                or (_row_session_id(row) == "")
             )
         ]
 
@@ -550,6 +577,7 @@ class SessionManager:
             source_subject_id = row[SubjectsColumns.SUBJECT_ID] if SubjectsColumns.SUBJECT_ID < len(row) else ""
             source_class_id = row[SubjectsColumns.CLASS_ID] if SubjectsColumns.CLASS_ID < len(row) else ""
             subject_name = row[SubjectsColumns.SUBJECT_NAME] if SubjectsColumns.SUBJECT_NAME < len(row) else ""
+            subject_type = _row_subject_type(row)
             new_class_id = source_to_new_class_map.get(source_class_id, "")
 
             if not source_subject_id:
@@ -598,6 +626,7 @@ class SessionManager:
                     "source_class_id": source_class_id,
                     "new_class_id": new_class_id,
                     "subject_name": subject_name.strip(),
+                    "subject_type": subject_type,
                 }
             )
 
@@ -614,7 +643,15 @@ class SessionManager:
         copied: List[Dict[str, str]] = []
 
         for item, new_subject_id in zip(prepared, new_subject_ids):
-            rows_to_append.append([new_subject_id, item["new_class_id"], item["subject_name"], new_session_id])
+            rows_to_append.append(
+                [
+                    new_subject_id,
+                    item["new_class_id"],
+                    item["subject_name"],
+                    item.get("subject_type", ""),
+                    new_session_id,
+                ]
+            )
             copied.append(
                 {
                     "source_subject_id": item["source_subject_id"],
@@ -622,6 +659,7 @@ class SessionManager:
                     "source_class_id": item["source_class_id"],
                     "new_class_id": item["new_class_id"],
                     "subject_name": item["subject_name"],
+                    "subject_type": item.get("subject_type", ""),
                     "session_id": new_session_id,
                 }
             )

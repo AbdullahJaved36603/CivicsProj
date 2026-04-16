@@ -87,6 +87,8 @@ class SubjectsColumns:
     SUBJECT_ID = 0
     CLASS_ID = 1
     SUBJECT_NAME = 2
+    SUBJECT_TYPE = 3
+    SESSION_ID = 4
 
 
 class TeachersColumns:
@@ -460,11 +462,18 @@ def delete_class(principal_id: str, school_id: str, class_id: str) -> Dict[str, 
     return get_principal_manager().delete_class(principal_id, school_id, class_id)
 
 
-def create_subject(principal_id: str, school_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
+def create_subject(principal_id: str, school_id: str, class_id: str, subject_name: str, subject_type: str) -> Dict[str, Any]:
     auth_check = _require_role(principal_id, "principal")
     if not auth_check.get("success"):
         return auth_check
-    return get_principal_manager().create_subject(principal_id, school_id, class_id, subject_name)
+    return get_principal_manager().create_subject(principal_id, school_id, class_id, subject_name, subject_type)
+
+
+def update_subject_type(principal_id: str, school_id: str, subject_id: str, subject_type: str) -> Dict[str, Any]:
+    auth_check = _require_role(principal_id, "principal")
+    if not auth_check.get("success"):
+        return auth_check
+    return get_principal_manager().update_subject_type(principal_id, school_id, subject_id, subject_type)
 
 
 def assign_class_incharge(principal_id: str, school_id: str, class_id: str, teacher_id: str) -> Dict[str, Any]:
@@ -942,6 +951,12 @@ def get_school_subjects(school_id: str, session_id: str = "") -> Dict[str, Any]:
                 "subject_id": row[SubjectsColumns.SUBJECT_ID] if SubjectsColumns.SUBJECT_ID < len(row) else "",
                 "class_id": class_id,
                 "subject_name": row[SubjectsColumns.SUBJECT_NAME] if SubjectsColumns.SUBJECT_NAME < len(row) else "",
+                "subject_type": (
+                    row[SubjectsColumns.SUBJECT_TYPE].strip().lower()
+                    if SubjectsColumns.SUBJECT_TYPE < len(row)
+                    and row[SubjectsColumns.SUBJECT_TYPE].strip().lower() in {"major", "minor"}
+                    else ""
+                ),
             }
         )
     return _response(True, "Subjects fetched successfully.", {"subjects": subjects})

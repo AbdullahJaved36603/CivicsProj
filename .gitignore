@@ -2,7 +2,8 @@
 __pycache__/
 *.py[cod]
 *.pyo
-
+.streamlit/secrets.toml
+scripts/populate_demo_data.py
 # Local secrets and environment files
 system_admin/Service.json
 .env

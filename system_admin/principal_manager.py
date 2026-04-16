@@ -68,6 +68,10 @@ class SubjectsColumns:
     SUBJECT_ID = 0
     CLASS_ID = 1
     SUBJECT_NAME = 2
+    SUBJECT_TYPE = 3
+    SESSION_ID = 4
+    SUBJECT_TYPE = 3
+    SESSION_ID = 4
 
 
 class TeachersColumns:
@@ -215,6 +219,13 @@ class PrincipalManager:
             if row_subject_name.strip().lower() == target_name:
                 return True
         return False
+
+    def _find_subject_row(self, subject_id: str) -> Optional[Tuple[int, List[str]]]:
+        rows = self.controller.read_tab(TAB_SUBJECTS)
+        for row_index, row in enumerate(rows[1:], start=2):
+            if SubjectsColumns.SUBJECT_ID < len(row) and row[SubjectsColumns.SUBJECT_ID] == subject_id:
+                return row_index, row
+        return None
 
     def _teacher_belongs_to_school(self, teacher_id: str, school_id: str) -> bool:
         active_session_id = self._get_active_session_id()
@@ -466,12 +477,13 @@ class PrincipalManager:
         except Exception as exc:
             return _response(False, f"Failed to delete class: {exc}")
 
-    def create_subject(self, principal_id: str, school_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
+    def create_subject(self, principal_id: str, school_id: str, class_id: str, subject_name: str, subject_type: str) -> Dict[str, Any]:
         try:
             normalized_principal_id = principal_id.strip()
             normalized_school_id = school_id.strip()
             normalized_class_id = class_id.strip()
             normalized_subject_name = subject_name.strip()
+            normalized_subject_type = subject_type.strip().lower()
 
             if not normalized_principal_id:
                 return _response(False, "principal_id is required.")
@@ -481,6 +493,8 @@ class PrincipalManager:
                 return _response(False, "class_id is required.")
             if not normalized_subject_name:
                 return _response(False, "subject_name is required.")
+            if normalized_subject_type not in {"major", "minor"}:
+                return _response(False, "subject_type must be Major or Minor.")
             if not self._is_principal_user(normalized_principal_id):
                 return _response(False, "Invalid principal_id. Principal account does not exist.")
 
@@ -499,8 +513,12 @@ class PrincipalManager:
             if self._subject_exists_in_class(normalized_class_id, normalized_subject_name):
                 return _response(False, "Subject already exists in this class.")
 
+            active_session_id = self._get_active_session_id() or ""
             subject_id = self.controller.generate_next_id("SUB", TAB_SUBJECTS, SubjectsColumns.SUBJECT_ID)
-            self.controller.append_row(TAB_SUBJECTS, [subject_id, normalized_class_id, normalized_subject_name])
+            self.controller.append_row(
+                TAB_SUBJECTS,
+                [subject_id, normalized_class_id, normalized_subject_name, normalized_subject_type, active_session_id],
+            )
 
             return _response(
                 True,
@@ -508,10 +526,69 @@ class PrincipalManager:
                 {
                     "subject_id": subject_id,
                     "class_id": normalized_class_id,
+                    "subject_type": normalized_subject_type,
                 },
             )
         except Exception as exc:
             return _response(False, f"Failed to create subject: {exc}")
+
+    def update_subject_type(self, principal_id: str, school_id: str, subject_id: str, subject_type: str) -> Dict[str, Any]:
+        try:
+            normalized_principal_id = principal_id.strip()
+            normalized_school_id = school_id.strip()
+            normalized_subject_id = subject_id.strip()
+            normalized_subject_type = subject_type.strip().lower()
+
+            if not normalized_principal_id:
+                return _response(False, "principal_id is required.")
+            if not normalized_school_id:
+                return _response(False, "school_id is required.")
+            if not normalized_subject_id:
+                return _response(False, "subject_id is required.")
+            if normalized_subject_type not in {"major", "minor"}:
+                return _response(False, "subject_type must be Major or Minor.")
+            if not self._is_principal_user(normalized_principal_id):
+                return _response(False, "Invalid principal_id. Principal account does not exist.")
+            if not self._principal_has_school_access(normalized_principal_id, normalized_school_id):
+                return _response(False, "Access denied")
+
+            subject_found = self._find_subject_row(normalized_subject_id)
+            if subject_found is None:
+                return _response(False, "Subject does not exist.")
+
+            row_index, subject_row = subject_found
+            class_id = self._safe_get(subject_row, SubjectsColumns.CLASS_ID)
+            class_found = self._find_class_row(class_id)
+            if class_found is None:
+                return _response(False, "Class does not exist.")
+
+            _, class_row = class_found
+            class_school_id = self._safe_get(class_row, ClassesColumns.SCHOOL_ID)
+            if class_school_id != normalized_school_id:
+                return _response(False, "Subject does not belong to your school.")
+
+            updated_row = list(subject_row)
+            if len(updated_row) <= SubjectsColumns.SUBJECT_TYPE:
+                updated_row.extend([""] * (SubjectsColumns.SUBJECT_TYPE + 1 - len(updated_row)))
+            updated_row[SubjectsColumns.SUBJECT_TYPE] = normalized_subject_type
+
+            if len(updated_row) <= SubjectsColumns.SESSION_ID:
+                active_session_id = self._get_active_session_id() or ""
+                updated_row.extend([""] * (SubjectsColumns.SESSION_ID + 1 - len(updated_row)))
+                updated_row[SubjectsColumns.SESSION_ID] = active_session_id
+
+            self.controller.update_row(TAB_SUBJECTS, row_index, updated_row)
+
+            return _response(
+                True,
+                "Subject type updated successfully.",
+                {
+                    "subject_id": normalized_subject_id,
+                    "subject_type": normalized_subject_type,
+                },
+            )
+        except Exception as exc:
+            return _response(False, f"Failed to update subject type: {exc}")
 
     def assign_class_incharge(self, principal_id: str, school_id: str, class_id: str, teacher_id: str) -> Dict[str, Any]:
         try:
@@ -672,8 +749,12 @@ def delete_class(principal_id: str, school_id: str, class_id: str) -> Dict[str, 
     return get_principal_manager().delete_class(principal_id, school_id, class_id)
 
 
-def create_subject(principal_id: str, school_id: str, class_id: str, subject_name: str) -> Dict[str, Any]:
-    return get_principal_manager().create_subject(principal_id, school_id, class_id, subject_name)
+def create_subject(principal_id: str, school_id: str, class_id: str, subject_name: str, subject_type: str) -> Dict[str, Any]:
+    return get_principal_manager().create_subject(principal_id, school_id, class_id, subject_name, subject_type)
+
+
+def update_subject_type(principal_id: str, school_id: str, subject_id: str, subject_type: str) -> Dict[str, Any]:
+    return get_principal_manager().update_subject_type(principal_id, school_id, subject_id, subject_type)
 
 
 def assign_class_incharge(principal_id: str, school_id: str, class_id: str, teacher_id: str) -> Dict[str, Any]:
