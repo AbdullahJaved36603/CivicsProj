@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
@@ -8,6 +9,10 @@ try:
     from .google_sheets_controller import GoogleSheetsController, get_controller
     from .google_sheets_utils import (
         ABSENT_MARK_TOKEN,
+        canonical_subject_name,
+        classify_subject,
+        evaluate_student_result,
+        get_class_pass_ratio,
         is_absent_token,
         number_to_string,
         parse_marks,
@@ -15,7 +20,17 @@ try:
     )
 except ImportError:
     from google_sheets_controller import GoogleSheetsController, get_controller
-    from google_sheets_utils import ABSENT_MARK_TOKEN, is_absent_token, number_to_string, parse_marks, to_float
+    from google_sheets_utils import (
+        ABSENT_MARK_TOKEN,
+        canonical_subject_name,
+        classify_subject,
+        evaluate_student_result,
+        get_class_pass_ratio,
+        is_absent_token,
+        number_to_string,
+        parse_marks,
+        to_float,
+    )
 
 
 TAB_SCHOOLS = "Schools"
@@ -25,12 +40,30 @@ TAB_TEACHERS = "teachers"
 TAB_TEACHER_ASSIGNMENTS = "Teacher_Assignments"
 TAB_EXAM_SESSIONS = "exam_sessions"
 TAB_SESSIONS = "Sessions"
+TAB_ACCOUNTS = "Accounts"
 
 SCHOOL_STUDENTS_TAB = "Students"
 SCHOOL_RESULTS_TAB = "Results"
 
 SCHOOL_STUDENTS_HEADERS = ["student_id", "student_name", "gender", "parent_name", "class_id", "school_id"]
-SCHOOL_RESULTS_HEADERS = ["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]
+SCHOOL_RESULTS_HEADERS = [
+    "exam_session_id",
+    "student_id",
+    "class_id",
+    "subject_id",
+    "marks",
+    "total_marks",
+    "subject_status",
+    "subject_percentage",
+    "subject_category",
+    "pass_ratio",
+    "failed_major_subjects",
+    "failed_minor_subjects",
+    "final_result",
+    "entered_by",
+    "modified_by",
+    "updated_at",
+]
 
 
 class SchoolsColumns:
@@ -72,6 +105,11 @@ class ExamSessionColumns:
     EXAM_SESSION_ID = 0
     SESSION_ID = 1
     MONTH = 2
+
+
+class AccountsColumns:
+    USER_ID = 0
+    ROLE = 3
 
 
 def _response(success: bool, message: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -232,6 +270,33 @@ class TeacherManager:
                 return True
         return False
 
+    def _is_admin_user(self, user_id: str) -> bool:
+        normalized_user_id = str(user_id).strip()
+        if not normalized_user_id:
+            return False
+
+        rows = self.controller.read_tab(TAB_ACCOUNTS)
+        for row in rows[1:]:
+            row_user_id = self._safe_get(row, AccountsColumns.USER_ID)
+            if row_user_id != normalized_user_id:
+                continue
+            role_value = self._safe_get(row, AccountsColumns.ROLE).strip().lower()
+            return role_value in {"admin", "super_user", "superuser"}
+        return False
+
+    def _teacher_can_edit_subject(self, actor_id: str, school_id: str, class_id: str, subject_id: str) -> bool:
+        if self._is_admin_user(actor_id):
+            return True
+
+        class_row = self._get_class_row(class_id)
+        if class_row is not None:
+            row_school_id = self._safe_get(class_row, ClassesColumns.SCHOOL_ID)
+            row_incharge_id = self._safe_get(class_row, ClassesColumns.CLASS_INCHARGE_TEACHER_ID)
+            if row_school_id == school_id and row_incharge_id == actor_id:
+                return True
+
+        return self._teacher_has_assignment(actor_id, school_id, class_id, subject_id)
+
     def _ensure_school_tabs(self, school_sheet_id: str) -> Dict[str, Any]:
         if school_sheet_id in self._schema_ensured_school_sheet_ids:
             return _response(True, "School worksheet schema already ensured.")
@@ -310,6 +375,16 @@ class TeacherManager:
         subject_index = self._header_index(headers, ["subject_id"])
         marks_index = self._header_index(headers, ["marks", "score"])
         total_index = self._header_index(headers, ["total_marks", "max_marks"])
+        subject_status_index = self._header_index(headers, ["subject_status", "status"])
+        subject_percentage_index = self._header_index(headers, ["subject_percentage", "percentage"])
+        subject_category_index = self._header_index(headers, ["subject_category", "category"])
+        pass_ratio_index = self._header_index(headers, ["pass_ratio", "passing_ratio", "pass_marks_ratio"])
+        failed_major_index = self._header_index(headers, ["failed_major_subjects", "failed_major"])
+        failed_minor_index = self._header_index(headers, ["failed_minor_subjects", "failed_minor"])
+        final_result_index = self._header_index(headers, ["final_result", "final_status", "promotion_status"])
+        entered_by_index = self._header_index(headers, ["entered_by", "created_by"])
+        modified_by_index = self._header_index(headers, ["modified_by", "updated_by"])
+        updated_at_index = self._header_index(headers, ["updated_at", "modified_at", "last_updated_at"])
 
         items: List[Dict[str, Any]] = []
         for row in rows[1:]:
@@ -333,6 +408,16 @@ class TeacherManager:
                     "subject_id": subject_id,
                     "marks": marks_value,
                     "total_marks": total_value,
+                    "subject_status": self._safe_get(row, subject_status_index),
+                    "subject_percentage": self._safe_get(row, subject_percentage_index),
+                    "subject_category": self._safe_get(row, subject_category_index),
+                    "pass_ratio": self._safe_get(row, pass_ratio_index),
+                    "failed_major_subjects": self._safe_get(row, failed_major_index),
+                    "failed_minor_subjects": self._safe_get(row, failed_minor_index),
+                    "final_result": self._safe_get(row, final_result_index),
+                    "entered_by": self._safe_get(row, entered_by_index),
+                    "modified_by": self._safe_get(row, modified_by_index),
+                    "updated_at": self._safe_get(row, updated_at_index),
                 }
             )
 
@@ -342,6 +427,22 @@ class TeacherManager:
 
         for column in ["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]:
             results_df[column] = results_df[column].astype(str).str.strip()
+
+        for column, default_value in {
+            "subject_status": "",
+            "subject_percentage": "",
+            "subject_category": "",
+            "pass_ratio": "",
+            "failed_major_subjects": "",
+            "failed_minor_subjects": "",
+            "final_result": "",
+            "entered_by": "",
+            "modified_by": "",
+            "updated_at": "",
+        }.items():
+            if column not in results_df.columns:
+                results_df[column] = default_value
+            results_df[column] = results_df[column].astype(str).fillna(default_value).str.strip()
 
         results_df["marks"] = results_df.apply(
             lambda row: parse_marks(row.get("marks", ""), row.get("total_marks", "")).get("normalized_marks", ABSENT_MARK_TOKEN),
@@ -365,11 +466,29 @@ class TeacherManager:
         if ordered_df.empty:
             values: List[List[str]] = [SCHOOL_RESULTS_HEADERS]
         else:
+            for column in SCHOOL_RESULTS_HEADERS:
+                if column not in ordered_df.columns:
+                    ordered_df[column] = ""
+
             for column in ["exam_session_id", "student_id", "class_id", "subject_id"]:
                 ordered_df[column] = ordered_df[column].astype(str).str.strip()
 
             ordered_df["marks"] = ordered_df["marks"].astype(str).str.strip()
             ordered_df["total_marks"] = ordered_df["total_marks"].astype(str).str.strip()
+            for column in [
+                "subject_status",
+                "subject_percentage",
+                "subject_category",
+                "pass_ratio",
+                "failed_major_subjects",
+                "failed_minor_subjects",
+                "final_result",
+                "entered_by",
+                "modified_by",
+                "updated_at",
+            ]:
+                ordered_df[column] = ordered_df[column].astype(str).str.strip()
+
             ordered_df = ordered_df.drop_duplicates(
                 subset=["exam_session_id", "student_id", "class_id", "subject_id"], keep="last"
             )
@@ -391,6 +510,16 @@ class TeacherManager:
                         str(row.get("subject_id", "")),
                         normalized_marks or ABSENT_MARK_TOKEN,
                         normalized_total,
+                        str(row.get("subject_status", "")),
+                        str(row.get("subject_percentage", "")),
+                        str(row.get("subject_category", "")),
+                        str(row.get("pass_ratio", "")),
+                        str(row.get("failed_major_subjects", "")),
+                        str(row.get("failed_minor_subjects", "")),
+                        str(row.get("final_result", "")),
+                        str(row.get("entered_by", "")),
+                        str(row.get("modified_by", "")),
+                        str(row.get("updated_at", "")),
                     ]
                 )
 
@@ -399,6 +528,103 @@ class TeacherManager:
             SCHOOL_RESULTS_TAB,
             values,
         )
+
+    def _subject_name_by_id_for_class(self, class_id: str) -> Dict[str, str]:
+        rows = self.controller.read_tab(TAB_SUBJECTS)
+        mapping: Dict[str, str] = {}
+        for row in rows[1:]:
+            row_subject_id = self._safe_get(row, SubjectsColumns.SUBJECT_ID)
+            row_class_id = self._safe_get(row, SubjectsColumns.CLASS_ID)
+            if row_class_id != class_id or not row_subject_id:
+                continue
+            mapping[row_subject_id] = self._safe_get(row, SubjectsColumns.SUBJECT_NAME)
+        return mapping
+
+    def _apply_student_result_rules(
+        self,
+        results_df: pd.DataFrame,
+        class_id: str,
+        exam_session_id: str,
+        class_name: str,
+        subject_name_by_id: Dict[str, str],
+    ) -> pd.DataFrame:
+        if results_df.empty:
+            return results_df
+
+        scoped_mask = (
+            (results_df["class_id"] == class_id)
+            & (results_df["exam_session_id"] == exam_session_id)
+        )
+        scoped_df = results_df[scoped_mask].copy()
+        if scoped_df.empty:
+            return results_df
+
+        pass_ratio = get_class_pass_ratio(class_name)
+        for student_id in sorted(set(scoped_df["student_id"].astype(str).tolist())):
+            student_mask = scoped_mask & (results_df["student_id"] == student_id)
+            student_rows = results_df[student_mask].copy()
+            if student_rows.empty:
+                continue
+
+            subject_rows: List[Dict[str, Any]] = []
+            for _, row in student_rows.iterrows():
+                subject_id = str(row.get("subject_id", "")).strip()
+                subject_name = subject_name_by_id.get(subject_id, subject_id)
+                subject_rows.append(
+                    {
+                        "subject_id": subject_id,
+                        "subject_name": subject_name,
+                        "marks": row.get("marks", ""),
+                        "total_marks": row.get("total_marks", ""),
+                    }
+                )
+
+            evaluation = evaluate_student_result(class_name, subject_rows)
+            final_status = str(evaluation.get("final_status", "Promoted"))
+            failed_major_subjects = int(evaluation.get("failed_major_subjects", 0) or 0)
+            failed_minor_subjects = int(evaluation.get("failed_minor_subjects", 0) or 0)
+
+            status_by_subject: Dict[str, Dict[str, Any]] = {
+                str(item.get("canonical_subject_name", "")): item
+                for item in evaluation.get("subject_rows", [])
+            }
+
+            for row_index in results_df[student_mask].index:
+                subject_id = str(results_df.at[row_index, "subject_id"]).strip()
+                subject_name = subject_name_by_id.get(subject_id, subject_id)
+                subject_key = canonical_subject_name(subject_name)
+
+                parsed = parse_marks(
+                    results_df.at[row_index, "marks"],
+                    results_df.at[row_index, "total_marks"],
+                    passing_ratio=pass_ratio,
+                )
+
+                subject_status = "Fail"
+                subject_percentage = 0.0
+                if parsed.get("status") == "Pass":
+                    subject_status = "Pass"
+                percentage_value = parsed.get("percentage")
+                if percentage_value is not None:
+                    subject_percentage = round(float(percentage_value), 2)
+
+                subject_category = classify_subject(subject_name).title()
+
+                evaluated_subject = status_by_subject.get(subject_key, {})
+                if evaluated_subject:
+                    subject_status = str(evaluated_subject.get("subject_status", subject_status))
+                    subject_percentage = float(evaluated_subject.get("subject_percentage", subject_percentage) or 0.0)
+                    subject_category = str(evaluated_subject.get("subject_category", subject_category))
+
+                results_df.at[row_index, "subject_status"] = subject_status
+                results_df.at[row_index, "subject_percentage"] = number_to_string(subject_percentage)
+                results_df.at[row_index, "subject_category"] = subject_category
+                results_df.at[row_index, "pass_ratio"] = number_to_string(pass_ratio * 100)
+                results_df.at[row_index, "failed_major_subjects"] = str(failed_major_subjects)
+                results_df.at[row_index, "failed_minor_subjects"] = str(failed_minor_subjects)
+                results_df.at[row_index, "final_result"] = final_status
+
+        return results_df
 
     def get_teacher_classes(self, teacher_id: str) -> Dict[str, Any]:
         try:
@@ -480,32 +706,56 @@ class TeacherManager:
             active_session_id = self._get_active_session_id()
             if not school_id or not active_session_id:
                 return _response(False, "Teacher is not assigned to any school.")
-            if not self._teacher_has_school_membership(normalized_teacher_id, school_id, active_session_id):
+            has_admin_access = self._is_admin_user(normalized_teacher_id)
+            if (not has_admin_access) and (not self._teacher_has_school_membership(normalized_teacher_id, school_id, active_session_id)):
                 return _response(False, "Access denied")
 
-            if not self._teacher_has_class_access(normalized_teacher_id, school_id, normalized_class_id):
+            if (not has_admin_access) and (not self._teacher_has_class_access(normalized_teacher_id, school_id, normalized_class_id)):
                 return _response(False, "Access denied")
 
             subject_rows = self.controller.read_tab(TAB_SUBJECTS)
-            subject_name_by_id = {
-                self._safe_get(row, SubjectsColumns.SUBJECT_ID): self._safe_get(row, SubjectsColumns.SUBJECT_NAME)
-                for row in subject_rows[1:]
-            }
+            class_subjects: List[Dict[str, str]] = []
+            for row in subject_rows[1:]:
+                row_subject_id = self._safe_get(row, SubjectsColumns.SUBJECT_ID)
+                row_class_id = self._safe_get(row, SubjectsColumns.CLASS_ID)
+                if row_class_id != normalized_class_id or not row_subject_id:
+                    continue
+                class_subjects.append(
+                    {
+                        "subject_id": row_subject_id,
+                        "subject_name": self._safe_get(row, SubjectsColumns.SUBJECT_NAME),
+                    }
+                )
 
-            assignments_rows = self.controller.read_tab(TAB_TEACHER_ASSIGNMENTS)
+            incharge_teacher_id = self._safe_get(class_row, ClassesColumns.CLASS_INCHARGE_TEACHER_ID)
+            is_incharge = incharge_teacher_id == normalized_teacher_id
+
             subjects: List[Dict[str, str]] = []
-            seen_subjects = set()
-            for row in assignments_rows[1:]:
-                row_teacher_id = self._safe_get(row, TeacherAssignmentsColumns.TEACHER_ID)
-                row_school_id = self._safe_get(row, TeacherAssignmentsColumns.SCHOOL_ID)
-                row_class_id = self._safe_get(row, TeacherAssignmentsColumns.CLASS_ID)
-                row_subject_id = self._safe_get(row, TeacherAssignmentsColumns.SUBJECT_ID)
-                if row_teacher_id != normalized_teacher_id or row_school_id != school_id or row_class_id != normalized_class_id:
-                    continue
-                if not row_subject_id or row_subject_id in seen_subjects:
-                    continue
-                seen_subjects.add(row_subject_id)
-                subjects.append({"subject_id": row_subject_id, "subject_name": subject_name_by_id.get(row_subject_id, "")})
+            if has_admin_access or is_incharge:
+                subjects = class_subjects
+            else:
+                assignments_rows = self.controller.read_tab(TAB_TEACHER_ASSIGNMENTS)
+                class_subject_name_by_id = {
+                    item.get("subject_id", ""): item.get("subject_name", "")
+                    for item in class_subjects
+                }
+                seen_subjects = set()
+                for row in assignments_rows[1:]:
+                    row_teacher_id = self._safe_get(row, TeacherAssignmentsColumns.TEACHER_ID)
+                    row_school_id = self._safe_get(row, TeacherAssignmentsColumns.SCHOOL_ID)
+                    row_class_id = self._safe_get(row, TeacherAssignmentsColumns.CLASS_ID)
+                    row_subject_id = self._safe_get(row, TeacherAssignmentsColumns.SUBJECT_ID)
+                    if row_teacher_id != normalized_teacher_id or row_school_id != school_id or row_class_id != normalized_class_id:
+                        continue
+                    if not row_subject_id or row_subject_id in seen_subjects:
+                        continue
+                    seen_subjects.add(row_subject_id)
+                    subjects.append(
+                        {
+                            "subject_id": row_subject_id,
+                            "subject_name": class_subject_name_by_id.get(row_subject_id, ""),
+                        }
+                    )
 
             return _response(True, "Teacher subjects fetched successfully.", {"subjects": subjects})
         except Exception as exc:
@@ -710,9 +960,10 @@ class TeacherManager:
             active_session_id = self._get_active_session_id()
             if not active_session_id:
                 return _response(False, "No active session found.")
-            if not self._teacher_has_school_membership(normalized_teacher_id, school_id, active_session_id):
+            has_admin_access = self._is_admin_user(normalized_teacher_id)
+            if (not has_admin_access) and (not self._teacher_has_school_membership(normalized_teacher_id, school_id, active_session_id)):
                 return _response(False, "Access denied")
-            if not self._teacher_has_assignment(normalized_teacher_id, school_id, normalized_class_id, normalized_subject_id):
+            if not self._teacher_can_edit_subject(normalized_teacher_id, school_id, normalized_class_id, normalized_subject_id):
                 return _response(False, "Access denied")
 
             exam_session_row = self._get_exam_session_row(normalized_exam_session_id)
@@ -820,12 +1071,14 @@ class TeacherManager:
                 return _response(False, "Class does not exist.")
 
             school_id = self._safe_get(class_row, ClassesColumns.SCHOOL_ID)
+            class_name = self._safe_get(class_row, ClassesColumns.CLASS_NAME)
             active_session_id = self._get_active_session_id()
             if not active_session_id:
                 return _response(False, "No active session found.")
-            if not self._teacher_has_school_membership(normalized_teacher_id, school_id, active_session_id):
+            has_admin_access = self._is_admin_user(normalized_teacher_id)
+            if (not has_admin_access) and (not self._teacher_has_school_membership(normalized_teacher_id, school_id, active_session_id)):
                 return _response(False, "Access denied")
-            if not self._teacher_has_assignment(normalized_teacher_id, school_id, normalized_class_id, normalized_subject_id):
+            if not self._teacher_can_edit_subject(normalized_teacher_id, school_id, normalized_class_id, normalized_subject_id):
                 return _response(False, "Access denied")
             if not self._subject_belongs_to_class(normalized_subject_id, normalized_class_id):
                 return _response(False, "Subject does not belong to class.")
@@ -879,22 +1132,34 @@ class TeacherManager:
                 "total_marks_invalid": "total_marks must be greater than zero.",
                 "marks_exceed_total": "Marks cannot be greater than total_marks.",
             }
+            pass_ratio = get_class_pass_ratio(class_name)
+            subject_name_by_id = self._subject_name_by_id_for_class(normalized_class_id)
+            subject_name = subject_name_by_id.get(normalized_subject_id, normalized_subject_id)
+            subject_category = classify_subject(subject_name).title()
+
             parsed_rows: List[Dict[str, Any]] = []
             for _, incoming_row in incoming_df.iterrows():
                 student_value = str(incoming_row.get("student_id", "")).strip()
                 marks_value = incoming_row.get("marks_text", "")
-                parsed = parse_marks(marks_value, total_marks_value)
+                parsed = parse_marks(marks_value, total_marks_value, passing_ratio=pass_ratio)
                 if not parsed.get("is_valid", False):
                     error_key = str(parsed.get("error", "")).strip()
                     error_message = parse_errors.get(error_key, "Invalid marks value.")
                     return _response(False, f"Invalid marks for student {student_value}: {error_message}")
+
+                percentage_value = parsed.get("percentage")
+                percentage = round(float(percentage_value), 2) if percentage_value is not None else 0.0
+                parsed_status = str(parsed.get("status", "Absent"))
+                subject_status = "Pass" if parsed_status == "Pass" else "Fail"
 
                 parsed_rows.append(
                     {
                         "student_id": student_value,
                         "marks": str(parsed.get("normalized_marks", ABSENT_MARK_TOKEN)) or ABSENT_MARK_TOKEN,
                         "total_marks": str(parsed.get("normalized_total_marks", "")) or self._number_to_str(total_marks_value),
-                        "status": str(parsed.get("status", "Absent")),
+                        "subject_status": subject_status,
+                        "subject_percentage": number_to_string(percentage),
+                        "subject_category": subject_category,
                         "is_explicit_absent": bool(parsed.get("is_explicit_absent", False)),
                     }
                 )
@@ -914,6 +1179,15 @@ class TeacherManager:
             )
             existing_target = results_df[target_mask].copy()
             existing_keys = set(existing_target["student_id"].astype(str).tolist()) if not existing_target.empty else set()
+            existing_audit_by_student: Dict[str, Dict[str, str]] = {}
+            if not existing_target.empty:
+                for _, existing_row in existing_target.iterrows():
+                    sid = str(existing_row.get("student_id", "")).strip()
+                    if not sid:
+                        continue
+                    existing_audit_by_student[sid] = {
+                        "entered_by": str(existing_row.get("entered_by", "")).strip(),
+                    }
 
             base_results = results_df[~target_mask].copy()
 
@@ -921,11 +1195,50 @@ class TeacherManager:
             rows_to_save["exam_session_id"] = normalized_exam_session_id
             rows_to_save["class_id"] = normalized_class_id
             rows_to_save["subject_id"] = normalized_subject_id
+            rows_to_save["pass_ratio"] = number_to_string(pass_ratio * 100)
+            rows_to_save["failed_major_subjects"] = ""
+            rows_to_save["failed_minor_subjects"] = ""
+            rows_to_save["final_result"] = ""
+
+            now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            rows_to_save["entered_by"] = ""
+            rows_to_save["modified_by"] = normalized_teacher_id
+            rows_to_save["updated_at"] = now_iso
+
+            for row_index in rows_to_save.index:
+                sid = str(rows_to_save.at[row_index, "student_id"]).strip()
+                existing_entered_by = existing_audit_by_student.get(sid, {}).get("entered_by", "")
+                rows_to_save.at[row_index, "entered_by"] = existing_entered_by or normalized_teacher_id
+
             rows_to_save = rows_to_save[
-                ["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]
+                [
+                    "exam_session_id",
+                    "student_id",
+                    "class_id",
+                    "subject_id",
+                    "marks",
+                    "total_marks",
+                    "subject_status",
+                    "subject_percentage",
+                    "subject_category",
+                    "pass_ratio",
+                    "failed_major_subjects",
+                    "failed_minor_subjects",
+                    "final_result",
+                    "entered_by",
+                    "modified_by",
+                    "updated_at",
+                ]
             ]
 
             merged_results = pd.concat([base_results, rows_to_save], ignore_index=True)
+            merged_results = self._apply_student_result_rules(
+                merged_results,
+                normalized_class_id,
+                normalized_exam_session_id,
+                class_name,
+                subject_name_by_id,
+            )
 
             self._write_results_dataframe(school_sheet_id, merged_results)
 
@@ -939,7 +1252,7 @@ class TeacherManager:
             if not current_target_df.empty:
                 for _, result_row in current_target_df.iterrows():
                     sid = str(result_row.get("student_id", "")).strip()
-                    parsed = parse_marks(result_row.get("marks", ""), result_row.get("total_marks", ""))
+                    parsed = parse_marks(result_row.get("marks", ""), result_row.get("total_marks", ""), passing_ratio=pass_ratio)
                     status_by_student[sid] = str(parsed.get("status", "Absent"))
 
             absent_count = 0
@@ -962,12 +1275,14 @@ class TeacherManager:
                     "subject_id": normalized_subject_id,
                     "exam_session_id": normalized_exam_session_id,
                     "total_marks": self._number_to_str(total_marks_value),
+                    "pass_marks_percentage": number_to_string(pass_ratio * 100),
                     "uploaded_count": int(len(incoming_student_ids)),
                     "inserted_count": int(inserted_count),
                     "updated_count": int(updated_count),
                     "deleted_count": int(deleted_count),
                     "explicit_absent_count": explicit_absent_count,
                     "absent_count": int(absent_count),
+                    "subject_category": subject_category,
                 },
             )
         except Exception as exc:
@@ -1004,7 +1319,19 @@ class TeacherManager:
             if not active_session_id:
                 return _response(False, "No active session found.")
 
-            for school_id in self._get_teacher_school_ids(normalized_teacher_id, active_session_id):
+            has_admin_access = self._is_admin_user(normalized_teacher_id)
+            candidate_school_ids: List[str]
+            if has_admin_access:
+                schools_rows = self.controller.read_tab(TAB_SCHOOLS)
+                candidate_school_ids = [
+                    self._safe_get(row, SchoolsColumns.SCHOOL_ID)
+                    for row in schools_rows[1:]
+                    if self._safe_get(row, SchoolsColumns.SCHOOL_ID)
+                ]
+            else:
+                candidate_school_ids = self._get_teacher_school_ids(normalized_teacher_id, active_session_id)
+
+            for school_id in candidate_school_ids:
                 school_sheet_id = self._get_school_sheet_id(school_id)
                 if not school_sheet_id:
                     continue
@@ -1022,7 +1349,7 @@ class TeacherManager:
                 if not class_id:
                     return _response(False, "Student class mapping is missing.")
 
-                if not self._teacher_has_assignment(normalized_teacher_id, school_id, class_id, normalized_subject_id):
+                if not self._teacher_can_edit_subject(normalized_teacher_id, school_id, class_id, normalized_subject_id):
                     return _response(False, "Access denied")
 
                 return self.save_marks(

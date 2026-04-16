@@ -142,6 +142,22 @@ def _require_role(user_id: str, role: str) -> Dict[str, Any]:
     return _response(True, "ok")
 
 
+def _require_any_role(user_id: str, roles: List[str]) -> Dict[str, Any]:
+    account = _get_account(user_id)
+    if account is None:
+        return _response(False, "User does not exist.")
+
+    row_role = account[AccountsColumns.ROLE].strip().lower() if AccountsColumns.ROLE < len(account) else ""
+    normalized_roles = {str(role).strip().lower() for role in roles}
+    if "admin" in normalized_roles:
+        normalized_roles.add("super_user")
+        normalized_roles.add("superuser")
+
+    if row_role not in normalized_roles:
+        return _response(False, "Access denied")
+    return _response(True, "ok")
+
+
 def _school_exists(school_id: str) -> bool:
     controller = get_controller()
     rows = controller.read_tab(TAB_SCHOOLS)
@@ -653,7 +669,7 @@ def enter_marks(
     subject_id: str,
     marks: str,
 ) -> Dict[str, Any]:
-    auth_check = _require_role(teacher_id, "teacher")
+    auth_check = _require_any_role(teacher_id, ["teacher", "admin"])
     if not auth_check.get("success"):
         return auth_check
     return get_teacher_manager().enter_marks(teacher_id, exam_session_id, student_id, subject_id, marks)
@@ -665,7 +681,7 @@ def get_teacher_marks_entry_grid(
     subject_id: str,
     exam_session_id: str,
 ) -> Dict[str, Any]:
-    auth_check = _require_role(teacher_id, "teacher")
+    auth_check = _require_any_role(teacher_id, ["teacher", "admin"])
     if not auth_check.get("success"):
         return auth_check
     return get_teacher_manager().get_marks_entry_grid(
@@ -684,7 +700,7 @@ def save_marks(
     total_marks: str,
     edited_dataframe: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    auth_check = _require_role(teacher_id, "teacher")
+    auth_check = _require_any_role(teacher_id, ["teacher", "admin"])
     if not auth_check.get("success"):
         return auth_check
     return get_teacher_manager().save_marks(
@@ -816,7 +832,7 @@ def get_teacher_classes(teacher_id: str) -> Dict[str, Any]:
 
 
 def get_teacher_subjects(teacher_id: str, class_id: str) -> Dict[str, Any]:
-    auth_check = _require_role(teacher_id, "teacher")
+    auth_check = _require_any_role(teacher_id, ["teacher", "admin"])
     if not auth_check.get("success"):
         return auth_check
     return get_teacher_manager().get_teacher_subjects(teacher_id, class_id)

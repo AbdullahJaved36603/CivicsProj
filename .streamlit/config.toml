@@ -6,3 +6,6 @@ secondaryBackgroundColor = "#0f172b"
 textColor = "#e2e8f0"
 font = "sans serif"
 showWidgetBorder = true
+
+[client]
+showSidebarNavigation = false

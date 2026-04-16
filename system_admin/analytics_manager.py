@@ -6,10 +6,10 @@ import pandas as pd
 
 try:
     from .google_sheets_controller import GoogleSheetsController, get_controller
-    from .google_sheets_utils import is_absent_token, parse_marks, to_float
+    from .google_sheets_utils import evaluate_student_result, is_absent_token, parse_marks, to_float
 except ImportError:
     from google_sheets_controller import GoogleSheetsController, get_controller
-    from google_sheets_utils import is_absent_token, parse_marks, to_float
+    from google_sheets_utils import evaluate_student_result, is_absent_token, parse_marks, to_float
 
 
 TAB_SESSIONS = "Sessions"
@@ -257,7 +257,20 @@ class AnalyticsManager:
         rows = self.controller.read_tab_from_spreadsheet(school_sheet_id, SCHOOL_RESULTS_TAB)
         if not rows:
             return pd.DataFrame(
-                columns=["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]
+                columns=[
+                    "exam_session_id",
+                    "student_id",
+                    "class_id",
+                    "subject_id",
+                    "marks",
+                    "total_marks",
+                    "subject_status",
+                    "subject_percentage",
+                    "subject_category",
+                    "failed_major_subjects",
+                    "failed_minor_subjects",
+                    "final_result",
+                ]
             )
 
         headers = rows[0]
@@ -267,6 +280,12 @@ class AnalyticsManager:
         subject_index = self._header_index(headers, ["subject_id"])
         marks_index = self._header_index(headers, ["marks", "score"])
         total_marks_index = self._header_index(headers, ["total_marks", "max_marks"])
+        subject_status_index = self._header_index(headers, ["subject_status", "status"])
+        subject_percentage_index = self._header_index(headers, ["subject_percentage", "percentage"])
+        subject_category_index = self._header_index(headers, ["subject_category", "category"])
+        failed_major_index = self._header_index(headers, ["failed_major_subjects", "failed_major"])
+        failed_minor_index = self._header_index(headers, ["failed_minor_subjects", "failed_minor"])
+        final_result_index = self._header_index(headers, ["final_result", "final_status", "promotion_status"])
 
         items: List[Dict[str, Any]] = []
         for row in rows[1:]:
@@ -293,17 +312,48 @@ class AnalyticsManager:
                     "subject_id": subject_id,
                     "marks": normalized_marks,
                     "total_marks": normalized_total,
+                    "subject_status": self._safe_get(row, subject_status_index),
+                    "subject_percentage": self._safe_get(row, subject_percentage_index),
+                    "subject_category": self._safe_get(row, subject_category_index),
+                    "failed_major_subjects": self._safe_get(row, failed_major_index),
+                    "failed_minor_subjects": self._safe_get(row, failed_minor_index),
+                    "final_result": self._safe_get(row, final_result_index),
                 }
             )
 
         results_df = pd.DataFrame(items)
         if results_df.empty:
             return pd.DataFrame(
-                columns=["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]
+                columns=[
+                    "exam_session_id",
+                    "student_id",
+                    "class_id",
+                    "subject_id",
+                    "marks",
+                    "total_marks",
+                    "subject_status",
+                    "subject_percentage",
+                    "subject_category",
+                    "failed_major_subjects",
+                    "failed_minor_subjects",
+                    "final_result",
+                ]
             )
 
         for column in ["exam_session_id", "student_id", "class_id", "subject_id", "marks", "total_marks"]:
             results_df[column] = results_df[column].astype(str).str.strip()
+
+        for column in [
+            "subject_status",
+            "subject_percentage",
+            "subject_category",
+            "failed_major_subjects",
+            "failed_minor_subjects",
+            "final_result",
+        ]:
+            if column not in results_df.columns:
+                results_df[column] = ""
+            results_df[column] = results_df[column].astype(str).fillna("").str.strip()
 
         results_df = results_df.drop_duplicates(
             subset=["exam_session_id", "student_id", "class_id", "subject_id"], keep="last"
@@ -362,10 +412,15 @@ class AnalyticsManager:
         parsed_items: List[Dict[str, Any]] = []
         for _, result_row in results_scope.iterrows():
             parsed = parse_marks(result_row.get("marks", ""), result_row.get("total_marks", ""))
-            status = str(parsed.get("status", "Absent"))
+            stored_subject_status = str(result_row.get("subject_status", "")).strip().title()
+            status = stored_subject_status if stored_subject_status in {"Pass", "Fail"} else str(parsed.get("status", "Absent"))
             is_appeared = 1 if status in {"Pass", "Fail"} else 0
             marks_value = float(parsed.get("marks_value", 0.0) or 0.0) if is_appeared else 0.0
             total_value = float(parsed.get("total_marks_value", 0.0) or 0.0) if is_appeared else 0.0
+            stored_percentage = self._to_float(result_row.get("subject_percentage", ""))
+            percentage_value = stored_percentage if stored_percentage is not None else (
+                ((marks_value / total_value) * 100) if is_appeared and total_value > 0 else None
+            )
             parsed_items.append(
                 {
                     "student_id": str(result_row.get("student_id", "")),
@@ -373,6 +428,8 @@ class AnalyticsManager:
                     "total_marks_value": total_value,
                     "status": status,
                     "is_appeared": is_appeared,
+                    "percentage": percentage_value,
+                    "final_result": str(result_row.get("final_result", "")).strip(),
                 }
             )
 
@@ -391,6 +448,7 @@ class AnalyticsManager:
                             "total_marks_value": "last",
                             "status": "last",
                             "is_appeared": "last",
+                            "percentage": "last",
                         }
                     )
                 )
@@ -403,7 +461,7 @@ class AnalyticsManager:
                     axis=1,
                 )
                 subject_result["percentage"] = subject_result.apply(
-                    lambda row: (
+                    lambda row: row.get("percentage") if row.get("percentage") not in (None, "") else (
                         (float(row.get("marks", 0.0)) / float(row.get("total_marks", 0.0))) * 100
                         if row.get("marks") is not None and row.get("total_marks") not in (None, 0)
                         else None
@@ -415,43 +473,83 @@ class AnalyticsManager:
             if parsed_results_df.empty:
                 student_result = pd.DataFrame(columns=["student_id", "marks", "total_marks", "status", "percentage"])
             else:
-                aggregate_result = (
-                    parsed_results_df.groupby("student_id", as_index=False)
-                    .agg(
-                        {
-                            "is_appeared": "sum",
-                            "marks_value": "sum",
-                            "total_marks_value": "sum",
-                        }
+                has_final_result = parsed_results_df["final_result"].astype(str).str.strip().ne("").any()
+                if has_final_result:
+                    aggregate_result = (
+                        parsed_results_df.groupby("student_id", as_index=False)
+                        .agg(
+                            {
+                                "marks_value": "sum",
+                                "total_marks_value": "sum",
+                                "final_result": "last",
+                            }
+                        )
                     )
-                )
 
-                def _aggregate_status(row: pd.Series) -> str:
-                    appeared_count = int(row.get("is_appeared", 0) or 0)
-                    total_value = float(row.get("total_marks_value", 0.0) or 0.0)
-                    if appeared_count <= 0 or total_value <= 0:
+                    def _status_from_final(row: pd.Series) -> str:
+                        final_text = str(row.get("final_result", "")).strip().casefold()
+                        if final_text == "promoted":
+                            return "Pass"
+                        if final_text == "fail":
+                            return "Fail"
                         return "Absent"
-                    marks_value = float(row.get("marks_value", 0.0) or 0.0)
-                    return "Pass" if marks_value >= (total_value * PASSING_RATIO) else "Fail"
 
-                aggregate_result["status"] = aggregate_result.apply(_aggregate_status, axis=1)
-                aggregate_result["marks"] = aggregate_result.apply(
-                    lambda row: row.get("marks_value") if str(row.get("status", "")) in {"Pass", "Fail"} else None,
-                    axis=1,
-                )
-                aggregate_result["total_marks"] = aggregate_result.apply(
-                    lambda row: row.get("total_marks_value") if str(row.get("status", "")) in {"Pass", "Fail"} else None,
-                    axis=1,
-                )
-                aggregate_result["percentage"] = aggregate_result.apply(
-                    lambda row: (
-                        (float(row.get("marks", 0.0)) / float(row.get("total_marks", 0.0))) * 100
-                        if row.get("marks") is not None and row.get("total_marks") not in (None, 0)
-                        else None
-                    ),
-                    axis=1,
-                )
-                student_result = aggregate_result[["student_id", "marks", "total_marks", "status", "percentage"]]
+                    aggregate_result["status"] = aggregate_result.apply(_status_from_final, axis=1)
+                    aggregate_result["marks"] = aggregate_result.apply(
+                        lambda row: row.get("marks_value") if str(row.get("status", "")) in {"Pass", "Fail"} else None,
+                        axis=1,
+                    )
+                    aggregate_result["total_marks"] = aggregate_result.apply(
+                        lambda row: row.get("total_marks_value") if str(row.get("status", "")) in {"Pass", "Fail"} else None,
+                        axis=1,
+                    )
+                    aggregate_result["percentage"] = aggregate_result.apply(
+                        lambda row: (
+                            (float(row.get("marks", 0.0)) / float(row.get("total_marks", 0.0))) * 100
+                            if row.get("marks") is not None and row.get("total_marks") not in (None, 0)
+                            else None
+                        ),
+                        axis=1,
+                    )
+                    student_result = aggregate_result[["student_id", "marks", "total_marks", "status", "percentage"]]
+                else:
+                    aggregate_result = (
+                        parsed_results_df.groupby("student_id", as_index=False)
+                        .agg(
+                            {
+                                "is_appeared": "sum",
+                                "marks_value": "sum",
+                                "total_marks_value": "sum",
+                            }
+                        )
+                    )
+
+                    def _aggregate_status(row: pd.Series) -> str:
+                        appeared_count = int(row.get("is_appeared", 0) or 0)
+                        total_value = float(row.get("total_marks_value", 0.0) or 0.0)
+                        if appeared_count <= 0 or total_value <= 0:
+                            return "Absent"
+                        marks_value = float(row.get("marks_value", 0.0) or 0.0)
+                        return "Pass" if marks_value >= (total_value * PASSING_RATIO) else "Fail"
+
+                    aggregate_result["status"] = aggregate_result.apply(_aggregate_status, axis=1)
+                    aggregate_result["marks"] = aggregate_result.apply(
+                        lambda row: row.get("marks_value") if str(row.get("status", "")) in {"Pass", "Fail"} else None,
+                        axis=1,
+                    )
+                    aggregate_result["total_marks"] = aggregate_result.apply(
+                        lambda row: row.get("total_marks_value") if str(row.get("status", "")) in {"Pass", "Fail"} else None,
+                        axis=1,
+                    )
+                    aggregate_result["percentage"] = aggregate_result.apply(
+                        lambda row: (
+                            (float(row.get("marks", 0.0)) / float(row.get("total_marks", 0.0))) * 100
+                            if row.get("marks") is not None and row.get("total_marks") not in (None, 0)
+                            else None
+                        ),
+                        axis=1,
+                    )
+                    student_result = aggregate_result[["student_id", "marks", "total_marks", "status", "percentage"]]
 
         merged = students_scope.merge(student_result, on="student_id", how="left")
         merged["status"] = merged["status"].fillna("Absent")
@@ -682,8 +780,10 @@ class AnalyticsManager:
 
             subject_rows: List[Dict[str, Any]] = []
             class_subjects = school_subjects_df[school_subjects_df["class_id"] == normalized_class_id]
+            class_subject_name_by_id: Dict[str, str] = {}
             for _, subject_row in class_subjects.iterrows():
                 subject_id = str(subject_row.get("subject_id", ""))
+                class_subject_name_by_id[subject_id] = str(subject_row.get("subject_name", ""))
                 perf_df = self._student_performance_frame(
                     students_df,
                     results_df,
@@ -700,6 +800,44 @@ class AnalyticsManager:
                     }
                 )
 
+            student_results: List[Dict[str, Any]] = []
+            class_students_df = students_df[students_df["class_id"] == normalized_class_id].copy()
+            class_results_df = results_df[
+                (results_df["exam_session_id"] == normalized_exam_session_id)
+                & (results_df["class_id"] == normalized_class_id)
+            ].copy()
+
+            for _, student_row in class_students_df.iterrows():
+                student_id = str(student_row.get("student_id", "")).strip()
+                if not student_id:
+                    continue
+
+                student_result_rows = class_results_df[class_results_df["student_id"] == student_id].copy()
+                subject_inputs: List[Dict[str, Any]] = []
+                for _, result_row in student_result_rows.iterrows():
+                    subject_id = str(result_row.get("subject_id", "")).strip()
+                    subject_inputs.append(
+                        {
+                            "subject_name": class_subject_name_by_id.get(subject_id, subject_id),
+                            "marks": result_row.get("marks", ""),
+                            "total_marks": result_row.get("total_marks", ""),
+                        }
+                    )
+
+                evaluation = evaluate_student_result(str(class_row.get("class_name", "")), subject_inputs)
+                student_results.append(
+                    {
+                        "student_id": student_id,
+                        "student_name": str(student_row.get("student_name", "")),
+                        "parent_name": str(student_row.get("parent_name", "")),
+                        "gender": str(student_row.get("gender", "Unknown")),
+                        "failed_major_subjects": int(evaluation.get("failed_major_subjects", 0) or 0),
+                        "failed_minor_subjects": int(evaluation.get("failed_minor_subjects", 0) or 0),
+                        "final_status": str(evaluation.get("final_status", "Promoted")),
+                        "subject_results": evaluation.get("subject_rows", []),
+                    }
+                )
+
             return _response(
                 True,
                 "Class analytics fetched successfully.",
@@ -713,6 +851,7 @@ class AnalyticsManager:
                     "exam_session_id": normalized_exam_session_id,
                     "overall": overall_metrics,
                     "subject_wise": subject_rows,
+                    "student_results": student_results,
                 }),
             )
         except Exception as exc:
@@ -842,6 +981,7 @@ class AnalyticsManager:
             normalized_session_id = session_id.strip()
             normalized_exam_session_id = exam_session_id.strip()
             normalized_class_name = class_name.strip()
+            selected_class_sheet_key = normalized_class_name or "Class"
 
             if not normalized_session_id:
                 return _response(False, "session_id is required.")
@@ -1005,6 +1145,7 @@ class AnalyticsManager:
                     class_name_value,
                     class_section_value,
                 )
+                class_sheet_key = selected_class_sheet_key
                 school_name = school_name_by_id.get(school_id, "")
 
                 students_df, results_df = school_cache.get(
@@ -1031,8 +1172,8 @@ class AnalyticsManager:
                 summary_passed_students += int(class_metrics.get("passed_students", 0))
                 summary_failed_students += int(class_metrics.get("failed_students", 0))
 
-                if class_label_value not in export_sheets:
-                    export_sheets[class_label_value] = []
+                if class_sheet_key not in export_sheets:
+                    export_sheets[class_sheet_key] = []
 
                 class_results_scope = results_df[
                     (results_df["exam_session_id"] == normalized_exam_session_id)
@@ -1042,6 +1183,7 @@ class AnalyticsManager:
                 if class_results_scope.empty:
                     no_data_row = {
                         "School": school_name,
+                        "Class": class_name_value,
                         "Subject": "No data available",
                         "Teacher": "-",
                         "Total": int(class_metrics.get("total_students", 0)),
@@ -1052,7 +1194,8 @@ class AnalyticsManager:
                         "Pass %": 0.0,
                         "Fail %": 0.0,
                     }
-                    export_sheets[class_label_value].append(no_data_row)
+                    no_data_row["Section"] = class_section_value
+                    export_sheets[class_sheet_key].append(no_data_row)
                     grouped_rows.append(
                         {
                             "School": school_name,
@@ -1128,9 +1271,11 @@ class AnalyticsManager:
                                 "Fail %": round(fail_percentage, 2),
                             }
                         )
-                        export_sheets[class_label_value].append(
+                        export_sheets[class_sheet_key].append(
                             {
                                 "School": school_name,
+                                "Class": class_name_value,
+                                "Section": class_section_value,
                                 "Subject": subject_name,
                                 "Teacher": teacher_name,
                                 "Total": total_students,
@@ -1164,6 +1309,15 @@ class AnalyticsManager:
                 grouped_rows = grouped_df.to_dict("records")
 
             sections = sorted(export_sheets.keys())
+            for sheet_name in sections:
+                sheet_rows = export_sheets.get(sheet_name, [])
+                if not sheet_rows:
+                    continue
+                sheet_df = pd.DataFrame(sheet_rows)
+                sort_cols = [col for col in ["School", "Section", "Subject", "Teacher"] if col in sheet_df.columns]
+                if sort_cols:
+                    sheet_df = sheet_df.sort_values(by=sort_cols, ignore_index=True)
+                export_sheets[sheet_name] = sheet_df.to_dict("records")
 
             return _response(
                 True,
