@@ -1078,6 +1078,7 @@ def get_admin_class_hierarchical_analytics(
     session_id: str = "",
     exam_session_id: str = "",
     class_name: str = "",
+    include_all_classes: bool = False,
 ) -> Dict[str, Any]:
     auth_check = _require_role(admin_id, "admin")
     if not auth_check.get("success"):
@@ -1102,6 +1103,7 @@ def get_admin_class_hierarchical_analytics(
         normalized_session_id,
         resolved_exam_session_id,
         class_name,
+        include_all_classes=include_all_classes,
     )
 
 

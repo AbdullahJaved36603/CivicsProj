@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import importlib
+import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Tuple
 
 import altair as alt
 import streamlit as st
 
+from system_admin.google_sheets_utils import safe_sheet_read
+
 _PLOTLY_IO: Any = None
+QUOTA_FREEZE_SECONDS = 15
+QUOTA_MAX_RETRY_CYCLES = 4
 
 LIGHT_THEME: Dict[str, str] = {
     "primaryColor": "#b77942",
@@ -69,6 +74,8 @@ def init_ui_state() -> None:
         st.session_state["theme"] = "dark"
     if "is_loading" not in st.session_state:
         st.session_state["is_loading"] = False
+    if "quota_cooldown_until" not in st.session_state:
+        st.session_state["quota_cooldown_until"] = 0.0
 
 
 def current_theme_name() -> str:
@@ -393,7 +400,112 @@ def render_theme_toggle() -> None:
 
 
 def controls_disabled() -> bool:
-    return bool(st.session_state.get("is_loading", False))
+    cooldown_until = float(st.session_state.get("quota_cooldown_until", 0.0) or 0.0)
+    on_cooldown = cooldown_until > time.time()
+    return bool(st.session_state.get("is_loading", False)) or on_cooldown
+
+
+def _quota_cooldown_remaining_seconds() -> int:
+    cooldown_until = float(st.session_state.get("quota_cooldown_until", 0.0) or 0.0)
+    return max(int(cooldown_until - time.time()), 0)
+
+
+def _is_quota_exhausted_message(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    quota_tokens = [
+        "quota exceeded",
+        "rate limit exceeded",
+        "resource_exhausted",
+        "too many requests",
+        "429",
+        "write requests per minute",
+        "read requests per minute",
+        "sheets.googleapis.com/write_requests",
+    ]
+    return any(token in normalized for token in quota_tokens)
+
+
+def _run_quota_cooldown(seconds: int = QUOTA_FREEZE_SECONDS) -> None:
+    freeze_seconds = max(int(seconds), 1)
+    st.session_state["quota_cooldown_until"] = time.time() + freeze_seconds
+
+    status = st.empty()
+    progress = st.progress(0)
+    try:
+        for remaining in range(freeze_seconds, 0, -1):
+            done = freeze_seconds - remaining
+            status.warning(
+                f"Google Sheets API quota reached. Retrying automatically in {remaining}s. "
+                "Controls are temporarily frozen."
+            )
+            progress.progress(min(int((done / freeze_seconds) * 100), 100))
+            time.sleep(1)
+        progress.progress(100)
+        status.info("Retrying now...")
+    finally:
+        st.session_state["quota_cooldown_until"] = 0.0
+
+
+def safe_backend_call_with_quota_guard(
+    api_func: Callable[[], Dict[str, Any]],
+    spinner_text: str,
+    retries: int = 3,
+    delay_seconds: float = 1.0,
+    quota_freeze_seconds: int = QUOTA_FREEZE_SECONDS,
+    max_quota_retry_cycles: int = QUOTA_MAX_RETRY_CYCLES,
+) -> Dict[str, Any]:
+    if controls_disabled():
+        remaining = _quota_cooldown_remaining_seconds()
+        if remaining > 0:
+            return {
+                "success": False,
+                "message": f"API cooldown in progress. Please wait {remaining}s.",
+            }
+        return {"success": False, "message": "Please wait, loading data..."}
+
+    quota_retry_count = 0
+    while True:
+        try:
+            with show_loading(spinner_text):
+                response = safe_sheet_read(api_func, retries=retries, delay_seconds=delay_seconds)
+
+            if not isinstance(response, dict):
+                return {"success": False, "message": "Unexpected server response."}
+
+            response_message = str(response.get("message", ""))
+            if (not response.get("success")) and _is_quota_exhausted_message(response_message):
+                if quota_retry_count >= max_quota_retry_cycles:
+                    return {
+                        "success": False,
+                        "message": (
+                            "Google Sheets API quota is still exhausted after repeated retries. "
+                            "Please try again in a minute."
+                        ),
+                    }
+                quota_retry_count += 1
+                _run_quota_cooldown(quota_freeze_seconds)
+                continue
+
+            return response
+        except Exception as exc:
+            if _is_quota_exhausted_message(str(exc)):
+                if quota_retry_count >= max_quota_retry_cycles:
+                    return {
+                        "success": False,
+                        "message": (
+                            "Google Sheets API quota is still exhausted after repeated retries. "
+                            "Please try again in a minute."
+                        ),
+                    }
+                quota_retry_count += 1
+                _run_quota_cooldown(quota_freeze_seconds)
+                continue
+            return {
+                "success": False,
+                "message": "Network issue while fetching data. Please wait and try again.",
+            }
 
 
 @contextmanager
@@ -410,6 +522,9 @@ def render_page_header(title: str, subtitle: str) -> None:
     st.markdown(f"# 🎓 {title}")
     st.markdown(f"<div class='sms-page-subtitle'>{subtitle}</div>", unsafe_allow_html=True)
     st.divider()
+    remaining = _quota_cooldown_remaining_seconds()
+    if remaining > 0:
+        st.warning(f"Google Sheets API cooldown active: {remaining}s remaining. Controls are temporarily frozen.")
 
 
 @contextmanager

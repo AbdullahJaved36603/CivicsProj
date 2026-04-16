@@ -9,9 +9,15 @@ import streamlit as st
 
 from frontend.components.forms import build_option_map, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
-from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
+from frontend.ui_theme import (
+    card,
+    controls_disabled,
+    ensure_page_config,
+    pill_select,
+    render_page_header,
+    safe_backend_call_with_quota_guard,
+)
 from system_admin import service_layer
-from system_admin.google_sheets_utils import safe_sheet_read
 
 
 def _records_to_csv(records: List[Dict[str, Any]]) -> str:
@@ -49,20 +55,7 @@ def _altair_line(data: pd.DataFrame, x_field: str, y_field: str, color_field: st
 
 
 def _safe_backend_call(api_func: Callable[[], Dict[str, Any]], spinner_text: str) -> Dict[str, Any]:
-    if controls_disabled():
-        return {"success": False, "message": "Please wait, loading data..."}
-
-    try:
-        with show_loading(spinner_text):
-            response = safe_sheet_read(api_func, retries=3, delay_seconds=1.0)
-        if isinstance(response, dict):
-            return response
-        return {"success": False, "message": "Unexpected server response."}
-    except Exception:
-        return {
-            "success": False,
-            "message": "Network issue while fetching data. Please wait and try again.",
-        }
+    return safe_backend_call_with_quota_guard(api_func, spinner_text)
 
 
 def _safe_int(value: Any) -> int:

@@ -976,6 +976,7 @@ class AnalyticsManager:
         session_id: str,
         exam_session_id: str,
         class_name: str = "",
+        include_all_classes: bool = False,
     ) -> Dict[str, Any]:
         try:
             normalized_session_id = session_id.strip()
@@ -1029,7 +1030,7 @@ class AnalyticsManager:
                 }
             )
 
-            if not normalized_class_name:
+            if not normalized_class_name and (not include_all_classes):
                 return _response(
                     True,
                     "Class names fetched successfully.",
@@ -1050,30 +1051,33 @@ class AnalyticsManager:
                     },
                 )
 
-            filtered_classes_df = session_classes_df[
-                session_classes_df["class_name"].astype(str).str.casefold() == normalized_class_name.casefold()
-            ].copy()
+            if normalized_class_name:
+                filtered_classes_df = session_classes_df[
+                    session_classes_df["class_name"].astype(str).str.casefold() == normalized_class_name.casefold()
+                ].copy()
 
-            if filtered_classes_df.empty:
-                return _response(
-                    True,
-                    "No class sections found for selected class name.",
-                    {
-                        "class_names": class_names,
-                        "summary": {
-                            "total_students": 0,
-                            "appeared_students": 0,
-                            "absent_students": 0,
-                            "passed_students": 0,
-                            "failed_students": 0,
-                            "pass_percentage": 0.0,
-                            "fail_percentage": 0.0,
+                if filtered_classes_df.empty:
+                    return _response(
+                        True,
+                        "No class sections found for selected class name.",
+                        {
+                            "class_names": class_names,
+                            "summary": {
+                                "total_students": 0,
+                                "appeared_students": 0,
+                                "absent_students": 0,
+                                "passed_students": 0,
+                                "failed_students": 0,
+                                "pass_percentage": 0.0,
+                                "fail_percentage": 0.0,
+                            },
+                            "grouped_rows": [],
+                            "sections": [],
+                            "export_sheets": {},
                         },
-                        "grouped_rows": [],
-                        "sections": [],
-                        "export_sheets": {},
-                    },
-                )
+                    )
+            else:
+                filtered_classes_df = session_classes_df.copy()
 
             filtered_class_ids = set(filtered_classes_df["class_id"].astype(str).tolist())
             filtered_school_ids = set(filtered_classes_df["school_id"].astype(str).tolist())
@@ -1145,8 +1149,12 @@ class AnalyticsManager:
                     class_name_value,
                     class_section_value,
                 )
-                class_sheet_key = selected_class_sheet_key
                 school_name = school_name_by_id.get(school_id, "")
+
+                if include_all_classes and (not normalized_class_name):
+                    class_sheet_key = class_name_value or selected_class_sheet_key
+                else:
+                    class_sheet_key = selected_class_sheet_key
 
                 students_df, results_df = school_cache.get(
                     school_id,

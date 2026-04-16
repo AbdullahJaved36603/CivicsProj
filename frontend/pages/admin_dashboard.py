@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import time
 from typing import Any, Callable, Dict, List, Tuple
 
 import pandas as pd
@@ -8,26 +9,19 @@ import streamlit as st
 
 from frontend.components.forms import build_option_map, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
-from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
+from frontend.ui_theme import (
+    card,
+    controls_disabled,
+    ensure_page_config,
+    pill_select,
+    render_page_header,
+    safe_backend_call_with_quota_guard,
+)
 from system_admin import service_layer
-from system_admin.google_sheets_utils import safe_sheet_read
 
 
 def _safe_backend_call(api_func: Callable[[], Dict[str, Any]], spinner_text: str) -> Dict[str, Any]:
-    if controls_disabled():
-        return {"success": False, "message": "Please wait, loading data..."}
-
-    try:
-        with show_loading(spinner_text):
-            response = safe_sheet_read(api_func, retries=3, delay_seconds=1.0)
-        if isinstance(response, dict):
-            return response
-        return {"success": False, "message": "Unexpected server response."}
-    except Exception:
-        return {
-            "success": False,
-            "message": "Network issue while fetching data. Please wait and try again.",
-        }
+    return safe_backend_call_with_quota_guard(api_func, spinner_text)
 
 
 def _cached_read(cache_key: str, fetch_func: Callable[[], Dict[str, Any]], data_key: str, spinner_text: str) -> List[Dict[str, Any]]:
@@ -44,6 +38,30 @@ def _cached_read(cache_key: str, fetch_func: Callable[[], Dict[str, Any]], data_
     return list(rows)
 
 
+def _cached_backend_response(
+    cache_key: str,
+    fetch_func: Callable[[], Dict[str, Any]],
+    spinner_text: str,
+    ttl_seconds: int = 120,
+) -> Dict[str, Any]:
+    now = time.time()
+    cached_entry = st.session_state.get(cache_key)
+    if isinstance(cached_entry, dict):
+        cached_at = float(cached_entry.get("cached_at", 0.0) or 0.0)
+        cached_response = cached_entry.get("response")
+        if (now - cached_at) <= float(ttl_seconds) and isinstance(cached_response, dict):
+            return cached_response
+
+    response = _safe_backend_call(fetch_func, spinner_text)
+    if not isinstance(response, dict):
+        response = {"success": False, "message": "Unexpected server response."}
+    st.session_state[cache_key] = {
+        "cached_at": now,
+        "response": response,
+    }
+    return response
+
+
 def _invalidate_admin_cache() -> None:
     keys = [
         "admin_all_schools",
@@ -52,7 +70,12 @@ def _invalidate_admin_cache() -> None:
         "admin_exam_sessions",
     ]
     for key in list(st.session_state.keys()):
-        if key in keys or key.startswith("admin_schools::"):
+        if (
+            key in keys
+            or key.startswith("admin_schools::")
+            or key.startswith("admin_hier::")
+            or key.startswith("admin_export::")
+        ):
             st.session_state.pop(key, None)
 
 
@@ -549,36 +572,35 @@ def _build_all_class_export_sheets(
     session_id: str,
     exam_session_id: str,
     class_names: List[str],
-    selected_class_name: str,
     selected_payload: Dict[str, Any],
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str]]:
     all_export_sheets: Dict[str, List[Dict[str, Any]]] = {}
     failed_classes: List[str] = []
+
+    export_cache_key = f"admin_hier::export::{session_id}::{exam_session_id}"
+    export_response = _cached_backend_response(
+        cache_key=export_cache_key,
+        fetch_func=lambda: service_layer.get_admin_class_hierarchical_analytics(
+            admin_id,
+            session_id,
+            exam_session_id,
+            "",
+            include_all_classes=True,
+        ),
+        spinner_text="Loading export rows for all classes...",
+        ttl_seconds=300,
+    )
+
+    export_payload = selected_payload
+    if export_response.get("success"):
+        export_payload = export_response.get("data", {})
 
     for class_name in class_names:
         normalized_class_name = str(class_name).strip()
         if not normalized_class_name:
             continue
 
-        class_payload: Dict[str, Any]
-        if normalized_class_name.casefold() == str(selected_class_name).strip().casefold():
-            class_payload = selected_payload
-        else:
-            class_response = _safe_backend_call(
-                lambda class_value=normalized_class_name: service_layer.get_admin_class_hierarchical_analytics(
-                    admin_id,
-                    session_id,
-                    exam_session_id,
-                    class_value,
-                ),
-                f"Loading export rows for class {normalized_class_name}...",
-            )
-            if not class_response.get("success"):
-                failed_classes.append(normalized_class_name)
-                continue
-            class_payload = class_response.get("data", {})
-
-        rows = _extract_class_export_rows(class_payload, normalized_class_name)
+        rows = _extract_class_export_rows(export_payload, normalized_class_name)
         if not rows:
             rows = [
                 {
@@ -597,6 +619,9 @@ def _build_all_class_export_sheets(
                 }
             ]
         all_export_sheets[normalized_class_name] = rows
+
+    if (not export_response.get("success")) and class_names:
+        failed_classes.extend([str(item).strip() for item in class_names if str(item).strip()])
 
     return all_export_sheets, failed_classes
 
@@ -630,14 +655,16 @@ def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
         )
         selected_exam_session_id = get_select_value(exam_session_map, selected_exam_label)
 
-        class_options_response = _safe_backend_call(
-            lambda: service_layer.get_admin_class_hierarchical_analytics(
+        class_options_cache_key = f"admin_hier::class_options::{selected_session_id}::{selected_exam_session_id}"
+        class_options_response = _cached_backend_response(
+            cache_key=class_options_cache_key,
+            fetch_func=lambda: service_layer.get_admin_class_hierarchical_analytics(
                 admin_id,
                 selected_session_id,
                 selected_exam_session_id,
                 "",
             ),
-            "Loading classes...",
+            spinner_text="Loading classes...",
         )
         if not class_options_response.get("success"):
             show_form_result(class_options_response)
@@ -655,14 +682,18 @@ def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
             disabled=controls_disabled(),
         )
 
-        analytics_response = _safe_backend_call(
-            lambda: service_layer.get_admin_class_hierarchical_analytics(
+        analytics_cache_key = (
+            f"admin_hier::selected::{selected_session_id}::{selected_exam_session_id}::{selected_class_name}"
+        )
+        analytics_response = _cached_backend_response(
+            cache_key=analytics_cache_key,
+            fetch_func=lambda: service_layer.get_admin_class_hierarchical_analytics(
                 admin_id,
                 selected_session_id,
                 selected_exam_session_id,
                 selected_class_name,
             ),
-            "Loading hierarchical analytics...",
+            spinner_text="Loading hierarchical analytics...",
         )
         show_form_result(analytics_response)
         if not analytics_response.get("success"):
@@ -712,35 +743,51 @@ def _render_global_analytics(admin_id: str, selected_session_id: str) -> None:
         else:
             st.info("No analytics rows found for selected filters.")
 
-        export_sheets, failed_classes = _build_all_class_export_sheets(
-            admin_id=admin_id,
-            session_id=selected_session_id,
-            exam_session_id=selected_exam_session_id,
-            class_names=class_names,
-            selected_class_name=selected_class_name,
-            selected_payload=payload,
+        export_key = f"admin_export::workbook::{selected_session_id}::{selected_exam_session_id}"
+        failed_key = f"admin_export::failed::{selected_session_id}::{selected_exam_session_id}"
+
+        prepare_export = st.button(
+            "Prepare Analytics Report",
+            use_container_width=True,
+            disabled=controls_disabled(),
+            key=f"prepare_admin_export::{selected_session_id}::{selected_exam_session_id}",
         )
-        sections = sorted(export_sheets.keys())
 
-        if sections:
-            workbook_bytes, error_message = _build_admin_analytics_workbook(sections, export_sheets)
-            if workbook_bytes is None:
-                st.error("Unable to generate Excel report. Please install 'xlsxwriter' or 'openpyxl' in deployment.")
-                if error_message:
-                    st.caption(f"Export engine error: {error_message}")
-                return
+        if prepare_export:
+            export_sheets, failed_classes = _build_all_class_export_sheets(
+                admin_id=admin_id,
+                session_id=selected_session_id,
+                exam_session_id=selected_exam_session_id,
+                class_names=class_names,
+                selected_payload=payload,
+            )
+            sections = sorted(export_sheets.keys())
+            if sections:
+                workbook_bytes, error_message = _build_admin_analytics_workbook(sections, export_sheets)
+                if workbook_bytes is None:
+                    st.error("Unable to generate Excel report. Please install 'xlsxwriter' or 'openpyxl' in deployment.")
+                    if error_message:
+                        st.caption(f"Export engine error: {error_message}")
+                else:
+                    st.session_state[export_key] = workbook_bytes
+                    st.session_state[failed_key] = failed_classes
 
-            if failed_classes:
+        workbook_bytes = st.session_state.get(export_key)
+        failed_classes = st.session_state.get(failed_key, [])
+
+        if isinstance(workbook_bytes, (bytes, bytearray)):
+            if isinstance(failed_classes, list) and failed_classes:
                 st.caption(f"Some classes were skipped in export due to load issues: {', '.join(sorted(failed_classes))}")
-
             st.download_button(
                 label="Download Analytics Report",
-                data=workbook_bytes,
+                data=bytes(workbook_bytes),
                 file_name="admin_class_analytics.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 disabled=controls_disabled(),
             )
+        else:
+            st.caption("Click 'Prepare Analytics Report' only when needed to avoid unnecessary API reads.")
 
 
 def render_admin_page(selected_page: str, admin_id: str) -> None:
