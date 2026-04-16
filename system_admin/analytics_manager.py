@@ -1409,11 +1409,16 @@ class AnalyticsManager:
                         "school_name": school_payload.get("school_name", ""),
                         "total_students": overall.get("total_students", 0),
                         "appeared_students": overall.get("appeared_students", 0),
+                        "absent_students": overall.get("absent_students", 0),
                         "passed_students": overall.get("passed_students", 0),
                         "failed_students": overall.get("failed_students", 0),
                         "pass_percentage": overall.get("pass_percentage", 0.0),
                         "fail_percentage": overall.get("fail_percentage", 0.0),
                         "average_marks": overall.get("average_marks", 0.0),
+                        "male_passed": overall.get("male_passed", 0),
+                        "male_failed": overall.get("male_failed", 0),
+                        "female_passed": overall.get("female_passed", 0),
+                        "female_failed": overall.get("female_failed", 0),
                     }
                 )
 

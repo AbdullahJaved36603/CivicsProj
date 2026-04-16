@@ -305,6 +305,71 @@ def render_admin_analytics(admin_id: str) -> None:
                     disabled=controls_disabled(),
                 )
 
+    if schools:
+        with card("School-wise Outcomes", "Overall and gender-wise outcomes for each school"):
+            school_frame = pd.DataFrame(schools)
+            if "absent_students" not in school_frame.columns:
+                school_frame["absent_students"] = (
+                    pd.to_numeric(school_frame.get("total_students", 0), errors="coerce").fillna(0)
+                    - pd.to_numeric(school_frame.get("appeared_students", 0), errors="coerce").fillna(0)
+                ).clip(lower=0)
+
+            outcome_cols = ["passed_students", "failed_students", "absent_students"]
+            for col in outcome_cols:
+                if col not in school_frame.columns:
+                    school_frame[col] = 0
+
+            outcome_long = school_frame[["school_name"] + outcome_cols].melt(
+                id_vars=["school_name"],
+                var_name="Outcome",
+                value_name="Students",
+            )
+            outcome_long["Outcome"] = outcome_long["Outcome"].replace(
+                {
+                    "passed_students": "Pass",
+                    "failed_students": "Fail",
+                    "absent_students": "Absent",
+                }
+            )
+
+            with st.container(border=True):
+                st.altair_chart(
+                    _altair_bar(outcome_long, "school_name", "Students", "Outcome"),
+                    use_container_width=True,
+                )
+
+            gender_components = []
+            gender_map = [
+                ("male_passed", "Male", "Pass"),
+                ("male_failed", "Male", "Fail"),
+                ("female_passed", "Female", "Pass"),
+                ("female_failed", "Female", "Fail"),
+            ]
+            for field, gender, outcome in gender_map:
+                if field not in school_frame.columns:
+                    school_frame[field] = 0
+                part = school_frame[["school_name", field]].copy()
+                part = part.rename(columns={field: "Students"})
+                part["Gender"] = gender
+                part["Outcome"] = outcome
+                gender_components.append(part)
+
+            if gender_components:
+                gender_school_frame = pd.concat(gender_components, ignore_index=True)
+                with st.container(border=True):
+                    gender_chart = (
+                        alt.Chart(gender_school_frame)
+                        .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+                        .encode(
+                            x=alt.X("school_name:N", title="School"),
+                            y=alt.Y("Students:Q", title="Students"),
+                            color=alt.Color("Outcome:N"),
+                            column=alt.Column("Gender:N", title="Gender"),
+                            tooltip=["school_name", "Gender", "Outcome", "Students"],
+                        )
+                    )
+                    st.altair_chart(gender_chart, use_container_width=True)
+
     if class_section_rows:
         with card("Class and Section Analytics", "Deep dive into class-level trends"):
             class_frame = pd.DataFrame(class_section_rows)

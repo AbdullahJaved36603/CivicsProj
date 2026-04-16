@@ -172,7 +172,9 @@ def safe_sheet_read(func: Callable[[], T], retries: int = 3, delay_seconds: floa
             last_error = exc
             if attempt < attempts - 1:
                 time.sleep(max(float(delay_seconds), 0.0))
-    raise Exception("Failed after retries") from last_error
+    if last_error is None:
+        raise RuntimeError("Failed after retries.")
+    raise RuntimeError(f"Failed after retries: {last_error}") from last_error
 
 
 def to_float(value: Any) -> Optional[float]:

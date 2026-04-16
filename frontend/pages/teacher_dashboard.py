@@ -10,9 +10,16 @@ import streamlit as st
 
 from frontend.components.forms import build_option_map, form_heading, get_select_value, show_form_result
 from frontend.components.tables import show_records, show_response_payload
-from frontend.ui_theme import card, controls_disabled, ensure_page_config, pill_select, render_page_header, show_loading
+from frontend.ui_theme import (
+    card,
+    controls_disabled,
+    ensure_page_config,
+    pill_select,
+    render_page_header,
+    safe_backend_call_with_quota_guard,
+)
 from system_admin import service_layer
-from system_admin.google_sheets_utils import parse_marks, safe_sheet_read
+from system_admin.google_sheets_utils import parse_marks
 
 
 def _init_ui_state() -> None:
@@ -47,22 +54,7 @@ def _loading() -> bool:
 
 
 def _safe_backend_call(api_func: Callable[[], Dict[str, Any]], spinner_text: str) -> Dict[str, Any]:
-    if _loading():
-        return {"success": False, "message": "Please wait, loading data..."}
-
-    try:
-        with show_loading(spinner_text):
-            response = safe_sheet_read(api_func, retries=3, delay_seconds=1.0)
-        if not isinstance(response, dict):
-            return {"success": False, "message": "Unexpected server response."}
-        return response
-    except Exception:
-        return {
-            "success": False,
-            "message": "Network issue while fetching data. Please wait and try again.",
-        }
-    finally:
-        pass
+    return safe_backend_call_with_quota_guard(api_func, spinner_text)
 
 
 def _cached_read(cache_key: str, fetch_func: Callable[[], Dict[str, Any]], data_key: str, spinner_text: str) -> List[Dict[str, Any]]:
